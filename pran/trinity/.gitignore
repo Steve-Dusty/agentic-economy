@@ -1,0 +1,132 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+*.log
+logs/
+
+# Environment variables (sensitive)
+.env
+.env.local
+.env.*.local
+.env.prod
+
+# MCP configuration with credentials
+.mcp.json
+
+# Docker
+*.pid
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Claude Code local settings (not the .claude folder itself)
+.claude/settings.local.json
+
+# Local deployment configuration (contains sensitive data)
+CLAUDE.local.md
+
+# API logs
+api.log
+
+# Config files with sensitive data (if any)
+config.env
+deploy.config
+
+# Deployment data
+deployment/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ===========================================
+# Trinity-specific exclusions
+# ===========================================
+
+# Test artifacts (generated during testing)
+test-results/
+test-screenshots/
+tests/reports/*.json
+tests/reports/*.md
+tests/reports/*.html
+!tests/reports/README.md
+
+# Database backups (sensitive)
+backups/
+
+# Dynamic test repositories (created during testing)
+repositories/
+# Exception: Process engine code repositories
+!src/backend/services/process_engine/repositories/
+
+# Archive folder (local development artifacts, root only)
+/archive/
+
+# Screenshots in root (test artifacts)
+*.png
+
+# Frontend build output
+src/frontend/dist/
+
+# Coverage reports
+tests/reports/coverage/
+
+# Test agent templates (created during automated tests)
+src/backend/config/agent-templates/test-*/
+
+# Agent template runtime artifacts (generated during execution)
+config/agent-templates/**/memory/
+config/agent-templates/**/outputs/
+config/agent-templates/**/metrics.json
+.playwright-mcp/

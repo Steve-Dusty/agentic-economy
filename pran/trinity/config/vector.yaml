@@ -1,0 +1,96 @@
+# Vector Configuration for Trinity
+# Collects logs from all Docker containers and writes to JSON files
+# Version: Vector 0.43.1 (latest stable as of Dec 2025)
+#
+# IMPORTANT LIMITATION: The docker_logs source only captures logs from AFTER
+# Vector starts watching. Logs from containers started before Vector are not
+# captured. See: https://github.com/vectordotdev/vector/issues/7358
+#
+# To ensure all logs are captured:
+# 1. Vector must be running before agents start
+# 2. If an agent was running before Vector, restart it to capture new logs
+
+api:
+  enabled: true
+  address: 0.0.0.0:8686
+
+# Sources - collect from Docker
+sources:
+  docker_logs:
+    type: docker_logs
+    # Automatically discovers all containers via Docker socket
+    # Streams logs in real-time from container start events
+    # NOTE: Does NOT read historical logs - only new logs after Vector starts
+
+# Transforms - enrich and route logs
+transforms:
+  enrich:
+    type: remap
+    inputs:
+      - docker_logs
+    source: |
+      # Add useful metadata
+      .service = .container_name
+      .is_agent = starts_with(string!(.container_name), "agent-")
+      .is_platform = !.is_agent && starts_with(string!(.container_name), "trinity-")
+
+      # Parse JSON logs if present (Python/Node often log JSON)
+      if is_string(.message) {
+        parsed, err = parse_json(.message)
+        if err == null {
+          .parsed = parsed
+        }
+      }
+
+      # Extract log level if present
+      if exists(.parsed.level) {
+        .level = .parsed.level
+      } else if exists(.parsed.levelname) {
+        .level = .parsed.levelname
+      } else if match(string!(.message), r'(?i)\b(error|err)\b') {
+        .level = "error"
+      } else if match(string!(.message), r'(?i)\b(warn|warning)\b') {
+        .level = "warning"
+      } else {
+        .level = "info"
+      }
+
+  # Route platform services
+  route_platform:
+    type: filter
+    inputs:
+      - enrich
+    condition:
+      type: vrl
+      source: '.is_platform == true'
+
+  # Route agent containers
+  route_agents:
+    type: filter
+    inputs:
+      - enrich
+    condition:
+      type: vrl
+      source: '.is_agent == true'
+
+# Sinks - write to files
+sinks:
+  # Platform services log file (daily rotation)
+  platform_logs:
+    type: file
+    inputs:
+      - route_platform
+    path: /data/logs/platform-%Y-%m-%d.json
+    encoding:
+      codec: json
+    compression: none
+
+  # Agent containers log file (daily rotation)
+  agent_logs:
+    type: file
+    inputs:
+      - route_agents
+    path: /data/logs/agents-%Y-%m-%d.json
+    encoding:
+      codec: json
+    compression: none

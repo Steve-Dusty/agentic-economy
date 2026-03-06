@@ -1,0 +1,66 @@
+# T4.4 - Skip on Error
+# 
+# Purpose: Validate on_error: skip_step behavior
+# Agent: non-existent-agent, process-echo
+# Expected: Failed step is skipped, process continues
+
+name: t4.4-skip-on-error
+version: "1.0"
+description: "Skip on error test - validates error boundary behavior"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: setup
+    name: Setup
+    type: agent_task
+    agent: process-echo
+    message: "Setting up skip test"
+    timeout: 120s
+
+  - id: optional-step
+    name: Optional Step (will fail)
+    type: agent_task
+    agent: non-existent-agent
+    depends_on:
+      - setup
+    message: "This will fail because agent doesn't exist"
+    timeout: 60s
+    on_error:
+      action: skip_step
+
+  - id: required-step
+    name: Required Step (always runs)
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - setup
+    message: "This step always runs"
+    timeout: 120s
+
+  - id: final-step
+    name: Final Step
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - optional-step
+      - required-step
+    message: "Final step completed"
+    timeout: 120s
+
+# Expected Flow:
+# 1. setup completes
+# 2. optional-step fails but is SKIPPED (not FAILED)
+# 3. required-step runs (no dependency on optional)
+# 4. final-step runs (optional was skipped, not blocking)
+# 5. Execution completes successfully
+
+# Verification Checklist:
+# [ ] setup completes
+# [ ] optional-step fails
+# [ ] optional-step status is SKIPPED (not FAILED)
+# [ ] required-step executes
+# [ ] final-step executes
+# [ ] Execution status: COMPLETED (not FAILED)

@@ -1,0 +1,129 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code when working with this repository.
+
+**Repository**: {{REPO_URL}}
+
+---
+
+## Project Overview
+
+**{{PROJECT_NAME}}** — {{PROJECT_DESCRIPTION}}
+
+**Local URLs**:
+- Web UI: {{FRONTEND_URL}}
+- Backend API: {{BACKEND_URL}}/docs
+
+---
+
+## Rules of Engagement
+
+### 1. Requirements-Driven Development
+- Update `docs/memory/requirements.md` **BEFORE** implementing new features
+- All features must trace back to documented requirements
+- Never add features without requirements update first
+
+### 2. Minimal Necessary Changes
+- Only change what's required for the task
+- No unsolicited refactoring or reorganization
+- No cosmetic formatting changes to unrelated code
+- No creating documentation files unless explicitly requested
+
+### 3. Follow the Roadmap
+- Check `docs/memory/roadmap.md` for current priorities
+- Work topmost incomplete items in the queue
+- Mark items complete with timestamp: `[x] 2025-01-08 HH:MM:SS`
+
+### 4. Mandatory Documentation Updates
+After **EVERY** change, update:
+- `docs/memory/changelog.md` - Add timestamped entry with emoji prefix
+- `docs/memory/architecture.md` - If changing APIs, schema, or integrations
+- `docs/memory/feature-flows/` - If modifying feature behavior
+- `docs/memory/requirements.md` - If changing feature scope
+
+### 5. Security First
+- Never expose credentials, API keys, or tokens in code or logs
+- Use environment variables for all secrets
+- Run `/security-check` before every commit
+- Use placeholder values in example configs (e.g., `your-domain.com`, `your-api-key`)
+- Review diffs before committing for accidental sensitive data
+
+---
+
+## Memory Files
+
+| File | Purpose |
+|------|---------|
+| `docs/memory/requirements.md` | **SINGLE SOURCE OF TRUTH** - All features |
+| `docs/memory/architecture.md` | Current system design (~1000 lines max) |
+| `docs/memory/roadmap.md` | Prioritized task queue |
+| `docs/memory/changelog.md` | Timestamped history (~500 lines) |
+| `docs/memory/feature-flows.md` | Index of vertical slice docs |
+
+---
+
+## Development Commands
+
+```bash
+# Start the application
+# TODO: Add your start command
+
+# Run tests
+# TODO: Add your test command
+
+# Build for production
+# TODO: Add your build command
+```
+
+---
+
+## Project Structure
+
+```
+{{PROJECT_NAME}}/
+├── src/                    # Source code
+│   ├── frontend/           # Frontend application
+│   └── backend/            # Backend application
+├── tests/                  # Test suite
+├── docs/
+│   ├── memory/             # Persistent project memory
+│   └── DEVELOPMENT_WORKFLOW.md
+├── .claude/
+│   ├── commands/           # Slash commands
+│   └── agents/             # Sub-agents
+└── CLAUDE.md               # This file
+```
+
+---
+
+## Key Files
+
+| Category | File | Description |
+|----------|------|-------------|
+| Backend | `src/backend/main.py` | Main application entry |
+| Frontend | `src/frontend/src/App.vue` | Root component |
+| Config | `.env.example` | Environment template |
+
+---
+
+## Important Notes for Claude Code
+
+1. **Load context first**: Always run `/read-docs` at session start
+
+2. **Test before committing**: Run tests after every significant change
+
+3. **Document changes**: Use `/update-docs` after making changes
+
+4. **Security check**: Run `/security-check` before every commit
+
+5. **Feature flows**: Read relevant feature flow before modifying a feature
+
+---
+
+## See Also
+
+- **Development Workflow**: `docs/DEVELOPMENT_WORKFLOW.md`
+- **Testing Guide**: `docs/TESTING_GUIDE.md`
+- **Full Requirements**: `docs/memory/requirements.md`
+- **Current Roadmap**: `docs/memory/roadmap.md`
+- **Recent Changes**: `docs/memory/changelog.md`

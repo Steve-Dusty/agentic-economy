@@ -1,0 +1,87 @@
+name: trinity-system
+display_name: Trinity System Agent
+description: Platform operations manager responsible for agent health, lifecycle, resource governance, and schedule control. Auto-deployed, deletion-protected, with full access to all Trinity MCP tools.
+version: "1.1.0"
+author: Trinity Platform
+priority: 1  # System template - always first
+
+type: system-orchestrator
+
+resources:
+  cpu: "4"
+  memory: "4g"
+
+capabilities:
+  - health-monitoring
+  - lifecycle-management
+  - resource-governance
+  - schedule-control
+  - fleet-operations
+  - platform-alerting
+  - compliance-auditing
+
+mcp_servers: []
+
+credentials: {}
+
+slash_commands:
+  # Fleet Operations
+  - name: /ops/status
+    description: Fleet status report - all agents with status, context, activity
+  - name: /ops/health
+    description: Health check - identify unhealthy agents with recommendations
+  - name: /ops/restart
+    description: Restart a specific agent
+    arguments: "<agent-name>"
+  - name: /ops/restart-all
+    description: Restart all agents (use with caution)
+  - name: /ops/stop
+    description: Stop a specific agent
+    arguments: "<agent-name>"
+  - name: /ops/costs
+    description: Cost report from OTel metrics (if enabled)
+  # Schedule Management
+  - name: /ops/schedules
+    description: Quick schedule overview
+  - name: /ops/schedules/list
+    description: Detailed list of all schedules with status and history
+  - name: /ops/schedules/pause
+    description: Pause schedules (optionally for specific agent)
+    arguments: "[agent-name]"
+  - name: /ops/schedules/resume
+    description: Resume paused schedules
+    arguments: "[agent-name]"
+  # Execution Management
+  - name: /ops/executions/list
+    description: List recent task executions across agents
+    arguments: "[agent-name] [hours]"
+  - name: /ops/executions/status
+    description: Get detailed status of a specific execution
+    arguments: "<execution-id>"
+  # Compliance & Auditing
+  - name: /ops/compatibility-audit
+    description: Audit all agents for Trinity compatibility via self-diagnostics
+  - name: /ops/service-check
+    description: Request agents to validate their runtime setup (read-only diagnostic)
+  # Dashboard & Reporting
+  - name: /ops/update-dashboard
+    description: Update dashboard.yaml with current platform metrics
+
+metrics:
+  - name: agents_managed
+    type: gauge
+    label: "Agents"
+    description: "Total agents in the platform"
+  - name: agents_healthy
+    type: gauge
+    label: "Healthy"
+    description: "Agents in healthy state"
+  - name: agents_unhealthy
+    type: gauge
+    label: "Unhealthy"
+    description: "Agents with issues"
+  - name: system_health
+    type: status
+    label: "Health"
+    description: "Overall platform health"
+    values: ["healthy", "degraded", "critical"]

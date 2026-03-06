@@ -1,0 +1,499 @@
+# =============================================================================
+# VC DUE DILIGENCE PROCESS
+# =============================================================================
+# "9 analysts. 60 seconds. One verdict."
+#
+# A comprehensive multi-agent due diligence process that:
+# 1. Parses pitch deck (Intake)
+# 2. Runs 9 specialist analyses in parallel
+# 3. Synthesizes findings (Deal Lead)
+# 4. Human approval gate (Investment Committee)
+# 5. Routes to approval or rejection workflow
+# =============================================================================
+
+name: vc-due-diligence
+version: 1
+description: |
+  Comprehensive VC due diligence - from pitch deck to investment decision.
+  9 specialist agents analyze in parallel, findings synthesized, human approval.
+
+# =============================================================================
+# TRIGGERS
+# =============================================================================
+triggers:
+  - type: manual
+    id: start-diligence
+
+# =============================================================================
+# STEPS
+# =============================================================================
+steps:
+
+  # ---------------------------------------------------------------------------
+  # PHASE 1: INTAKE - Parse and Extract
+  # ---------------------------------------------------------------------------
+  - id: intake
+    type: agent_task
+    name: "Parse Pitch Deck"
+    agent: vc-due-diligence-dd-intake
+    message: |
+      Parse the following pitch deck and extract structured data for due diligence.
+
+      ## Company Information
+      - Company Name: {{input.company_name}}
+      - Pitch Deck URL: {{input.pitch_deck_url}}
+      - Additional Documents: {{input.additional_docs}}
+
+      ## Instructions
+      1. Extract all key information from the pitch deck
+      2. Identify founders and their claimed backgrounds
+      3. Note all numerical claims (revenue, growth, market size)
+      4. Flag any obvious red flags or missing information
+      5. Output structured JSON for specialist agents
+
+      Save extraction to /home/developer/shared-out/extractions/
+    timeout: 10m
+    retry:
+      max_attempts: 2
+      delay: 30s
+
+  # ---------------------------------------------------------------------------
+  # PHASE 2: PARALLEL SPECIALIST ANALYSIS (9 agents simultaneously)
+  # ---------------------------------------------------------------------------
+
+  # Founder Background Check
+  - id: founder-analysis
+    type: agent_task
+    name: "Founder Background Check"
+    agent: vc-due-diligence-dd-founder
+    depends_on: [intake]
+    message: |
+      Conduct thorough founder and team background checks.
+
+      ## Company: {{input.company_name}}
+
+      ## Founders to Research
+      Review the intake extraction at /home/developer/shared-in/dd-intake/extractions/
+
+      ## Research Mandate
+      1. Verify all claims made in the pitch deck
+      2. Check track record and previous ventures
+      3. Identify any red flags or controversies
+      4. Assess expertise fit for this venture
+      5. Evaluate commitment level
+
+      Save findings to /home/developer/shared-out/founder-analysis/
+    timeout: 15m
+
+  # Market Research
+  - id: market-analysis
+    type: agent_task
+    name: "Market Research"
+    agent: vc-due-diligence-dd-market
+    depends_on: [intake]
+    message: |
+      Validate market opportunity claims.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+
+      ## Research Mandate
+      1. Verify TAM/SAM/SOM claims with multiple sources
+      2. Validate growth rate projections
+      3. Identify market headwinds and tailwinds
+      4. Assess market timing
+
+      Save findings to /home/developer/shared-out/market-analysis/
+    timeout: 15m
+
+  # Competitive Intelligence
+  - id: competitor-analysis
+    type: agent_task
+    name: "Competitive Landscape"
+    agent: vc-due-diligence-dd-competitor
+    depends_on: [intake]
+    message: |
+      Map the competitive landscape.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+
+      ## Research Mandate
+      1. Identify direct and indirect competitors
+      2. Compare funding and traction levels
+      3. Assess competitive moats and threats
+      4. Evaluate big tech encroachment risk
+
+      Save findings to /home/developer/shared-out/competitor-analysis/
+    timeout: 15m
+
+  # Technical Assessment
+  - id: tech-assessment
+    type: agent_task
+    name: "Technical Due Diligence"
+    agent: vc-due-diligence-dd-tech
+    depends_on: [intake]
+    message: |
+      Assess technology and product.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+
+      ## Research Mandate
+      1. Evaluate problem-solution fit
+      2. Assess technology maturity and scalability
+      3. Analyze IP strength and protection
+      4. Review security posture
+
+      Save findings to /home/developer/shared-out/tech-analysis/
+    timeout: 15m
+
+  # Business Model Review
+  - id: bizmodel-analysis
+    type: agent_task
+    name: "Business Model Review"
+    agent: vc-due-diligence-dd-bizmodel
+    depends_on: [intake]
+    message: |
+      Analyze business model sustainability.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+
+      ## Research Mandate
+      1. Evaluate revenue model viability
+      2. Assess unit economics
+      3. Analyze scalability limits
+      4. Determine path to profitability
+
+      Save findings to /home/developer/shared-out/bizmodel-analysis/
+    timeout: 15m
+
+  # Traction & Financials
+  - id: traction-analysis
+    type: agent_task
+    name: "Traction & Financials"
+    agent: vc-due-diligence-dd-traction
+    depends_on: [intake]
+    message: |
+      Verify traction and financial health.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+      ## Financial Documents: {{input.financial_docs}}
+
+      ## Research Mandate
+      1. Verify growth metrics accuracy
+      2. Assess burn rate and runway
+      3. Validate unit economics
+      4. Identify financial red flags
+
+      Save findings to /home/developer/shared-out/traction-analysis/
+    timeout: 15m
+
+  # Regulatory Compliance
+  - id: compliance-review
+    type: agent_task
+    name: "Regulatory Compliance"
+    agent: vc-due-diligence-dd-compliance
+    depends_on: [intake]
+    message: |
+      Assess regulatory landscape and compliance.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+      ## Target Markets: {{input.target_markets}}
+
+      ## Research Mandate
+      1. Determine industry regulation level
+      2. Assess current compliance status
+      3. Identify geographic expansion risks
+      4. Flag pending regulatory threats
+
+      Save findings to /home/developer/shared-out/compliance-analysis/
+    timeout: 15m
+
+  # Cap Table Analysis
+  - id: captable-analysis
+    type: agent_task
+    name: "Cap Table Review"
+    agent: vc-due-diligence-dd-captable
+    depends_on: [intake]
+    message: |
+      Analyze cap table and equity structure.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+      ## Cap Table Info: {{input.cap_table}}
+
+      ## Research Mandate
+      1. Assess founder dilution
+      2. Evaluate existing investor quality
+      3. Identify structure concerns
+      4. Model future dilution risk
+
+      Save findings to /home/developer/shared-out/captable-analysis/
+    timeout: 15m
+
+  # Legal Review
+  - id: legal-review
+    type: agent_task
+    name: "Legal Due Diligence"
+    agent: vc-due-diligence-dd-legal
+    depends_on: [intake]
+    message: |
+      Conduct legal review.
+
+      ## Company: {{input.company_name}}
+
+      ## Review intake extraction at /home/developer/shared-in/dd-intake/extractions/
+      ## Legal Documents: {{input.legal_docs}}
+
+      ## Research Mandate
+      1. Review corporate structure
+      2. Verify IP ownership
+      3. Identify investor restrictions
+      4. Check licensing and litigation
+
+      Save findings to /home/developer/shared-out/legal-analysis/
+    timeout: 15m
+
+  # ---------------------------------------------------------------------------
+  # PHASE 3: SYNTHESIS - Deal Lead consolidates all findings
+  # ---------------------------------------------------------------------------
+  - id: risk-synthesis
+    type: agent_task
+    name: "Synthesize Findings"
+    agent: vc-due-diligence-dd-lead
+    depends_on:
+      - founder-analysis
+      - market-analysis
+      - competitor-analysis
+      - tech-assessment
+      - bizmodel-analysis
+      - traction-analysis
+      - compliance-review
+      - captable-analysis
+      - legal-review
+    message: |
+      Synthesize all due diligence findings for {{input.company_name}}.
+
+      ## Your Task
+      Review all specialist reports in /home/developer/shared-in/ and synthesize into
+      a comprehensive investment recommendation.
+
+      ## Specialist Reports Available
+      - /shared-in/dd-founder/founder-analysis/
+      - /shared-in/dd-market/market-analysis/
+      - /shared-in/dd-competitor/competitor-analysis/
+      - /shared-in/dd-tech/tech-analysis/
+      - /shared-in/dd-bizmodel/bizmodel-analysis/
+      - /shared-in/dd-traction/traction-analysis/
+      - /shared-in/dd-compliance/compliance-analysis/
+      - /shared-in/dd-captable/captable-analysis/
+      - /shared-in/dd-legal/legal-analysis/
+
+      ## Deliverables
+      1. Overall risk score (0-100)
+      2. Critical issues that could be deal breakers
+      3. Key strengths
+      4. Investment recommendation (strong-pass to strong-invest)
+      5. Executive summary for Investment Committee
+
+      ## Context
+      - Funding Round: {{input.funding_round}}
+      - Funding Ask: {{input.funding_ask}}
+
+      Save recommendation to /home/developer/shared-out/investment-recommendation/
+    timeout: 20m
+
+  # ---------------------------------------------------------------------------
+  # PHASE 4: HUMAN APPROVAL - Investment Committee
+  # ---------------------------------------------------------------------------
+  - id: investment-committee
+    type: human_approval
+    name: "Investment Committee Review"
+    depends_on: [risk-synthesis]
+    title: "Investment Decision: {{input.company_name}}"
+    description: |
+      # Investment Committee Review
+
+      ## Company: {{input.company_name}}
+      **Funding Round**: {{input.funding_round}}
+      **Ask**: {{input.funding_ask}}
+
+      ---
+
+      ## Due Diligence Summary
+
+      The Deal Lead has synthesized findings from 9 specialist agents.
+      Review the complete analysis at /shared-in/dd-lead/investment-recommendation/
+
+      ---
+
+      ## Decision Required
+
+      Based on the comprehensive due diligence:
+
+      **APPROVE** → Proceed to term sheet preparation
+      **REJECT** → Send decline notice
+
+      Please provide your decision and any additional comments or conditions.
+    timeout: 72h
+    timeout_action: skip
+
+  # ---------------------------------------------------------------------------
+  # PHASE 5: DECISION ROUTING
+  # ---------------------------------------------------------------------------
+  - id: decision-gate
+    type: gateway
+    name: "Route Decision"
+    depends_on: [investment-committee]
+    routes:
+      - condition: "steps.investment-committee.output.decision == 'approved'"
+        target: prepare-term-sheet
+    default_route: send-rejection
+
+  # ---------------------------------------------------------------------------
+  # PHASE 6: OUTCOMES
+  # ---------------------------------------------------------------------------
+
+  # Approved Path - Prepare Term Sheet
+  - id: prepare-term-sheet
+    type: agent_task
+    name: "Prepare Term Sheet"
+    agent: vc-due-diligence-dd-legal
+    depends_on: [decision-gate]
+    message: |
+      Prepare term sheet for {{input.company_name}}.
+
+      ## Investment Decision: APPROVED
+
+      ## Committee Comments
+      {{steps.investment-committee.output.comments}}
+
+      ## Risk Assessment
+      Review the Deal Lead's recommendation at /home/developer/shared-in/dd-lead/investment-recommendation/
+
+      ## Instructions
+      Draft a term sheet with:
+      1. Recommended valuation based on risk assessment
+      2. Protective provisions appropriate to identified risks
+      3. Key conditions and milestones
+      4. Standard terms for this stage
+
+      Save term sheet to /home/developer/shared-out/legal-analysis/term-sheet/
+    timeout: 30m
+
+  # Approved Path - Save Final Report
+  - id: save-approval-report
+    type: agent_task
+    name: "Save Approval Report"
+    agent: vc-due-diligence-dd-lead
+    depends_on: [prepare-term-sheet]
+    message: |
+      Create the final approval report for {{input.company_name}}.
+
+      ## Investment Decision: APPROVED ✅
+
+      The Investment Committee has approved proceeding with this investment.
+
+      ## Committee Comments
+      {{steps.investment-committee.output.comments}}
+
+      ## Your Task
+      Create a comprehensive final report at /home/developer/shared-out/final-report/
+
+      Include:
+      1. **OUTCOME.md** - A summary document with:
+         - Company name: {{input.company_name}}
+         - Funding round: {{input.funding_round}}
+         - Funding ask: {{input.funding_ask}}
+         - Decision: APPROVED
+         - Committee comments
+         - Next steps (review term sheet, schedule founder meeting, begin negotiation)
+
+      2. Copy key documents to final-report/:
+         - investment_recommendation.json (from investment-recommendation/)
+         - ic_briefing.md (from investment-recommendation/)
+         - term-sheet/ (from /shared-in/dd-legal/legal-analysis/term-sheet/)
+
+      The final-report/ folder is the deliverable for this due diligence process.
+    timeout: 5m
+
+  # Rejected Path - Save Rejection Report
+  - id: save-rejection-report
+    type: agent_task
+    name: "Save Rejection Report"
+    agent: vc-due-diligence-dd-lead
+    depends_on: [decision-gate]
+    message: |
+      Create the final rejection report for {{input.company_name}}.
+
+      ## Investment Decision: PASS ❌
+
+      After comprehensive due diligence, the Investment Committee has decided not to proceed with this investment.
+
+      ## Committee Feedback
+      {{steps.investment-committee.output.comments}}
+
+      ## Your Task
+      Create a final report at /home/developer/shared-out/final-report/
+
+      Include:
+      1. **OUTCOME.md** - A summary document with:
+         - Company name: {{input.company_name}}
+         - Funding round: {{input.funding_round}}
+         - Funding ask: {{input.funding_ask}}
+         - Decision: PASS
+         - Committee feedback
+         - Key reasons for rejection (from your investment_recommendation.json)
+
+      2. Copy key documents to final-report/:
+         - investment_recommendation.json (from investment-recommendation/)
+         - ic_briefing.md (from investment-recommendation/)
+
+      The final-report/ folder is the deliverable for this due diligence process.
+    timeout: 5m
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+# All results are saved to dd-lead's shared folder at:
+#   /home/developer/shared-out/final-report/
+#
+# Contents:
+#   - OUTCOME.md (decision summary)
+#   - investment_recommendation.json (full analysis)
+#   - ic_briefing.md (Investment Committee briefing)
+#   - term-sheet/ (if approved)
+#
+# Access via Trinity File Manager: Agents → dd-lead → Files → shared-out/final-report/
+# =============================================================================
+outputs:
+  - name: company_name
+    source: "{{input.company_name}}"
+    description: Company evaluated
+
+  - name: risk_score
+    source: "{{steps.risk-synthesis.output.risk_score}}"
+    description: Overall risk score (0-100)
+
+  - name: recommendation
+    source: "{{steps.risk-synthesis.output.recommendation}}"
+    description: Investment recommendation
+
+  - name: decision
+    source: "{{steps.investment-committee.output.decision}}"
+    description: Final investment decision
+
+  - name: final_report_location
+    source: "dd-lead shared folder: /shared-out/final-report/"
+    description: Where to find the complete due diligence deliverables

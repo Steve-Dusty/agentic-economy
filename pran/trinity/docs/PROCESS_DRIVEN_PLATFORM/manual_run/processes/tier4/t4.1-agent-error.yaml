@@ -1,0 +1,51 @@
+# T4.1 - Agent Returns Error
+# 
+# Purpose: Validate error propagation when agent fails
+# Agent: non-existent-agent (to trigger AGENT_NOT_FOUND error)
+# Expected: Step fails, execution fails, error captured
+
+name: t4.1-agent-error
+version: "1.0"
+description: "Agent error test - validates error propagation"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: setup
+    name: Setup
+    type: agent_task
+    agent: process-echo
+    message: "Setting up test"
+    timeout: 120s
+
+  - id: fail-step
+    name: Failing Step
+    type: agent_task
+    agent: non-existent-agent
+    depends_on:
+      - setup
+    message: "This will fail because agent doesn't exist"
+    timeout: 120s
+
+  - id: after-fail
+    name: After Fail (should not run)
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - fail-step
+    message: "This should not execute"
+    timeout: 120s
+
+# Expected Flow:
+# 1. setup completes
+# 2. fail-step fails (agent not found)
+# 3. after-fail never executes
+# 4. Execution status: FAILED
+
+# Verification Checklist:
+# [ ] setup completes successfully
+# [ ] fail-step fails with AGENT_NOT_FOUND or similar
+# [ ] after-fail status is PENDING (never started)
+# [ ] Execution status is FAILED

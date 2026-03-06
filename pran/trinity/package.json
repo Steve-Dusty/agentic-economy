@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "hono": ">=4.11.7"
+  }
+}

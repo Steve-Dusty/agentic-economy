@@ -1,0 +1,81 @@
+# Example: Approval Workflow (Core Phase)
+#
+# This process demonstrates human-in-the-loop approval:
+# 1. Agent drafts a document
+# 2. Human reviews and approves/rejects
+# 3. If approved, agent finalizes
+# 4. If rejected, agent revises based on feedback
+#
+# Note: Human approval steps will be implemented in Core phase.
+# This example shows the planned syntax.
+
+name: approval-workflow
+version: 1
+description: Document creation with human approval gate
+
+steps:
+  # Step 1: Create initial draft
+  - id: draft
+    name: Create Draft
+    type: agent_task
+    agent: writer-agent
+    message: |
+      Create a draft document for:
+      {{input.request}}
+      
+      Follow company guidelines and best practices.
+    timeout: 10m
+
+  # Step 2: Human approval (Core phase feature)
+  - id: review
+    name: Manager Review
+    type: human_approval
+    title: "Document Review Required"
+    description: |
+      Please review the draft document:
+      {{steps.draft.output}}
+      
+      Approve if ready for publication, or reject with feedback.
+    assignees:
+      - manager@example.com
+    depends_on: draft
+    timeout: 48h
+
+  # Step 3: Conditional - finalize if approved
+  - id: finalize
+    name: Finalize Document
+    type: agent_task
+    agent: writer-agent
+    message: |
+      The document has been approved. Please:
+      1. Add final formatting
+      2. Generate PDF version
+      3. Prepare for distribution
+      
+      Original draft:
+      {{steps.draft.output}}
+    depends_on: review
+    condition: "{{steps.review.decision}} == 'approved'"
+    timeout: 5m
+
+  # Step 4: Conditional - revise if rejected
+  - id: revise
+    name: Revise Based on Feedback
+    type: agent_task
+    agent: writer-agent
+    message: |
+      The document needs revision. Feedback from reviewer:
+      {{steps.review.feedback}}
+      
+      Original draft:
+      {{steps.draft.output}}
+      
+      Please address all feedback points.
+    depends_on: review
+    condition: "{{steps.review.decision}} == 'rejected'"
+    timeout: 15m
+
+outputs:
+  - name: document
+    source: "{{steps.finalize.output || steps.revise.output}}"
+    description: The final document (approved or revised)

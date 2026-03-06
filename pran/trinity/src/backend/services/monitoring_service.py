@@ -1,0 +1,705 @@
+"""
+Agent Monitoring Service (MON-001)
+
+Performs multi-layer health checks on agent infrastructure:
+- Layer 1: Docker (container status, resources, restarts, OOM)
+- Layer 2: Network (HTTP reachability, latency)
+- Layer 3: Business (runtime availability, context usage, error rates)
+
+Health checks run as background tasks and store results in the database.
+Alerts are sent via the notification system when status changes.
+"""
+
+import asyncio
+import time
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor
+
+import docker
+import httpx
+
+from database import db
+from db_models import (
+    AgentHealthStatus,
+    HealthCheckType,
+    DockerHealthCheck,
+    NetworkHealthCheck,
+    BusinessHealthCheck,
+    AgentHealthDetail,
+    AgentHealthSummary,
+    FleetHealthSummary,
+    FleetHealthStatus,
+    MonitoringConfig,
+)
+from utils.helpers import utc_now_iso
+
+
+# =========================================================================
+# Configuration
+# =========================================================================
+
+DEFAULT_CONFIG = MonitoringConfig()
+
+# Initialize Docker client
+try:
+    docker_client = docker.from_env()
+except Exception as e:
+    print(f"Warning: Monitoring service could not connect to Docker: {e}")
+    docker_client = None
+
+
+# =========================================================================
+# Health Check Functions
+# =========================================================================
+
+def check_docker_health(agent_name: str) -> DockerHealthCheck:
+    """
+    Perform Docker layer health check.
+
+    Checks:
+    - Container status (running/stopped/etc)
+    - Exit code
+    - Restart count
+    - OOM killed status
+    - CPU and memory usage
+    """
+    now = utc_now_iso()
+
+    if not docker_client:
+        return DockerHealthCheck(
+            agent_name=agent_name,
+            container_status="unknown",
+            checked_at=now
+        )
+
+    try:
+        container = docker_client.containers.get(f"agent-{agent_name}")
+    except docker.errors.NotFound:
+        return DockerHealthCheck(
+            agent_name=agent_name,
+            container_status="not_found",
+            checked_at=now
+        )
+    except Exception as e:
+        return DockerHealthCheck(
+            agent_name=agent_name,
+            container_status="error",
+            checked_at=now
+        )
+
+    # Get container state from attrs
+    state = container.attrs.get("State", {})
+
+    # Get resource stats (this can be slow, ~1-2s)
+    cpu_percent = None
+    memory_percent = None
+    memory_mb = None
+
+    try:
+        # Use stream=False for one-shot stats
+        stats = container.stats(stream=False)
+
+        # Calculate CPU percentage
+        cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
+                    stats["precpu_stats"]["cpu_usage"]["total_usage"]
+        system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
+                       stats["precpu_stats"]["system_cpu_usage"]
+        num_cpus = stats["cpu_stats"].get("online_cpus", 1)
+
+        if system_delta > 0 and cpu_delta > 0:
+            cpu_percent = (cpu_delta / system_delta) * num_cpus * 100
+
+        # Calculate memory percentage
+        mem_usage = stats["memory_stats"].get("usage", 0)
+        mem_limit = stats["memory_stats"].get("limit", 1)
+        memory_percent = (mem_usage / mem_limit) * 100 if mem_limit > 0 else 0
+        memory_mb = mem_usage / (1024 * 1024)
+    except Exception:
+        pass  # Stats unavailable for stopped containers
+
+    return DockerHealthCheck(
+        agent_name=agent_name,
+        container_status=container.status,
+        exit_code=state.get("ExitCode"),
+        restart_count=container.attrs.get("RestartCount", 0),
+        oom_killed=state.get("OOMKilled", False),
+        cpu_percent=round(cpu_percent, 2) if cpu_percent is not None else None,
+        memory_percent=round(memory_percent, 2) if memory_percent is not None else None,
+        memory_mb=round(memory_mb, 2) if memory_mb is not None else None,
+        checked_at=now
+    )
+
+
+async def check_network_health(
+    agent_name: str,
+    timeout: float = 10.0
+) -> NetworkHealthCheck:
+    """
+    Perform Network layer health check.
+
+    Checks:
+    - HTTP reachability to agent's /health endpoint
+    - Response time (latency)
+    - HTTP status code
+    """
+    now = utc_now_iso()
+    url = f"http://agent-{agent_name}:8000/health"
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(url)
+            latency_ms = (time.monotonic() - start) * 1000
+
+            return NetworkHealthCheck(
+                agent_name=agent_name,
+                reachable=True,
+                status_code=response.status_code,
+                latency_ms=round(latency_ms, 2),
+                checked_at=now
+            )
+    except httpx.TimeoutException:
+        return NetworkHealthCheck(
+            agent_name=agent_name,
+            reachable=False,
+            error="HTTP timeout",
+            checked_at=now
+        )
+    except httpx.ConnectError:
+        return NetworkHealthCheck(
+            agent_name=agent_name,
+            reachable=False,
+            error="Connection refused",
+            checked_at=now
+        )
+    except Exception as e:
+        return NetworkHealthCheck(
+            agent_name=agent_name,
+            reachable=False,
+            error=str(e)[:200],
+            checked_at=now
+        )
+
+
+async def check_business_health(
+    agent_name: str,
+    timeout: float = 10.0
+) -> BusinessHealthCheck:
+    """
+    Perform Business logic health check.
+
+    Checks:
+    - Runtime availability (from /health response)
+    - Claude availability
+    - Context window usage (from /api/chat/session)
+    - Active executions
+    - Recent error rate
+    """
+    now = utc_now_iso()
+
+    runtime_available = None
+    claude_available = None
+    context_percent = None
+    active_execution_count = 0
+    stuck_execution_count = 0
+    recent_error_rate = 0.0
+
+    # Check /health endpoint for runtime status
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            health_response = await client.get(f"http://agent-{agent_name}:8000/health")
+            if health_response.status_code == 200:
+                health_data = health_response.json()
+                runtime_available = health_data.get("runtime_available", True)
+                claude_available = health_data.get("claude_available", True)
+    except Exception:
+        pass  # Will be marked as degraded/unhealthy by aggregation
+
+    # Check /api/chat/session for context usage
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            session_response = await client.get(f"http://agent-{agent_name}:8000/api/chat/session")
+            if session_response.status_code == 200:
+                session_data = session_response.json()
+                context_used = session_data.get("context_used", 0)
+                context_max = session_data.get("context_max", 200000)
+                if context_max > 0:
+                    context_percent = (context_used / context_max) * 100
+    except Exception:
+        pass
+
+    # Check /api/executions/running for active executions
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            exec_response = await client.get(f"http://agent-{agent_name}:8000/api/executions/running")
+            if exec_response.status_code == 200:
+                exec_data = exec_response.json()
+                executions = exec_data.get("executions", [])
+                active_execution_count = len(executions)
+
+                # Check for stuck executions (running > 30 min)
+                stuck_threshold = datetime.utcnow() - timedelta(minutes=30)
+                for ex in executions:
+                    started_at = ex.get("started_at", "")
+                    try:
+                        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                        if started.replace(tzinfo=None) < stuck_threshold:
+                            stuck_execution_count += 1
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # Calculate recent error rate from activities (last 5 min)
+    # This would require querying the activities table, simplified here
+    # TODO: Implement actual error rate calculation from agent_activities
+
+    # Determine status based on checks
+    status = "healthy"
+    issues = []
+    if runtime_available is False or claude_available is False:
+        status = "unhealthy"
+    elif context_percent and context_percent > 95:
+        status = "degraded"
+    elif stuck_execution_count > 0:
+        status = "degraded"
+
+    return BusinessHealthCheck(
+        agent_name=agent_name,
+        status=status,
+        runtime_available=runtime_available,
+        claude_available=claude_available,
+        context_percent=round(context_percent, 2) if context_percent is not None else None,
+        active_execution_count=active_execution_count,
+        stuck_execution_count=stuck_execution_count,
+        recent_error_rate=recent_error_rate,
+        credential_status=None,
+        checked_at=now
+    )
+
+
+def aggregate_health(
+    docker: DockerHealthCheck,
+    network: NetworkHealthCheck,
+    business: BusinessHealthCheck,
+    config: MonitoringConfig = DEFAULT_CONFIG
+) -> Tuple[AgentHealthStatus, List[str]]:
+    """
+    Aggregate health checks into a single status.
+
+    Priority: Docker > Network > Business
+
+    Returns:
+        Tuple of (status, list of issues)
+    """
+    issues = []
+
+    # Critical: Docker layer failures
+    if docker.container_status == "not_found":
+        issues.append("Container not found")
+        return AgentHealthStatus.CRITICAL, issues
+
+    if docker.container_status not in ("running", "unknown"):
+        issues.append(f"Container status: {docker.container_status}")
+        return AgentHealthStatus.CRITICAL, issues
+
+    if docker.oom_killed:
+        issues.append("Container killed by OOM")
+        return AgentHealthStatus.CRITICAL, issues
+
+    # Unhealthy: Network or runtime failures
+    if not network.reachable:
+        issues.append(f"Network unreachable: {network.error or 'unknown'}")
+        return AgentHealthStatus.UNHEALTHY, issues
+
+    if business.runtime_available is False:
+        issues.append("Runtime not available")
+        return AgentHealthStatus.UNHEALTHY, issues
+
+    # Degraded: Performance issues
+    if docker.cpu_percent is not None and docker.cpu_percent > config.cpu_critical_percent:
+        issues.append(f"High CPU usage ({docker.cpu_percent:.1f}%)")
+        return AgentHealthStatus.DEGRADED, issues
+
+    if docker.memory_percent is not None and docker.memory_percent > config.memory_critical_percent:
+        issues.append(f"High memory usage ({docker.memory_percent:.1f}%)")
+        return AgentHealthStatus.DEGRADED, issues
+
+    if network.latency_ms is not None and network.latency_ms > config.latency_critical_ms:
+        issues.append(f"High latency ({network.latency_ms:.0f}ms)")
+        return AgentHealthStatus.DEGRADED, issues
+
+    if business.context_percent is not None and business.context_percent > config.context_critical_percent:
+        issues.append(f"Context window at {business.context_percent:.1f}%")
+        return AgentHealthStatus.DEGRADED, issues
+
+    if business.recent_error_rate > config.error_rate_critical:
+        issues.append(f"High error rate ({business.recent_error_rate * 100:.1f}%)")
+        return AgentHealthStatus.DEGRADED, issues
+
+    if business.stuck_execution_count > 0:
+        issues.append(f"{business.stuck_execution_count} stuck execution(s)")
+        return AgentHealthStatus.DEGRADED, issues
+
+    # Warning-level issues (still healthy but with warnings)
+    if docker.cpu_percent is not None and docker.cpu_percent > config.cpu_warning_percent:
+        issues.append(f"Elevated CPU usage ({docker.cpu_percent:.1f}%)")
+
+    if docker.memory_percent is not None and docker.memory_percent > config.memory_warning_percent:
+        issues.append(f"Elevated memory usage ({docker.memory_percent:.1f}%)")
+
+    if docker.restart_count and docker.restart_count > 3:
+        issues.append(f"High restart count ({docker.restart_count})")
+
+    return AgentHealthStatus.HEALTHY, issues
+
+
+# =========================================================================
+# Composite Health Check
+# =========================================================================
+
+async def perform_health_check(
+    agent_name: str,
+    config: MonitoringConfig = DEFAULT_CONFIG,
+    store_results: bool = True
+) -> AgentHealthDetail:
+    """
+    Perform comprehensive health check for an agent.
+
+    Runs all three health check layers and aggregates results.
+    Optionally stores results in the database.
+
+    Returns:
+        AgentHealthDetail with all check results
+    """
+    # Run Docker check in thread pool (blocking)
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        docker_check = await loop.run_in_executor(
+            executor,
+            check_docker_health,
+            agent_name
+        )
+
+    # Run network and business checks concurrently
+    network_check, business_check = await asyncio.gather(
+        check_network_health(agent_name, config.http_timeout),
+        check_business_health(agent_name, config.http_timeout)
+    )
+
+    # Aggregate results
+    status, issues = aggregate_health(docker_check, network_check, business_check, config)
+    now = utc_now_iso()
+
+    # Store results if requested
+    if store_results:
+        # Store individual layer checks
+        db.create_health_check(
+            agent_name=agent_name,
+            check_type="docker",
+            status="healthy" if docker_check.container_status == "running" else "unhealthy",
+            docker_metrics={
+                "container_status": docker_check.container_status,
+                "exit_code": docker_check.exit_code,
+                "restart_count": docker_check.restart_count,
+                "oom_killed": docker_check.oom_killed,
+                "cpu_percent": docker_check.cpu_percent,
+                "memory_percent": docker_check.memory_percent,
+                "memory_mb": docker_check.memory_mb,
+            }
+        )
+
+        db.create_health_check(
+            agent_name=agent_name,
+            check_type="network",
+            status="healthy" if network_check.reachable else "unhealthy",
+            network_metrics={
+                "reachable": network_check.reachable,
+                "latency_ms": network_check.latency_ms,
+            },
+            error_message=network_check.error
+        )
+
+        db.create_health_check(
+            agent_name=agent_name,
+            check_type="business",
+            status=business_check.status,
+            business_metrics={
+                "runtime_available": business_check.runtime_available,
+                "claude_available": business_check.claude_available,
+                "context_percent": business_check.context_percent,
+                "active_executions": business_check.active_execution_count,
+                "error_rate": business_check.recent_error_rate,
+                "credential_status": business_check.credential_status,
+            }
+        )
+
+        # Store aggregate result
+        db.create_health_check(
+            agent_name=agent_name,
+            check_type="aggregate",
+            status=status.value,
+            docker_metrics={
+                "container_status": docker_check.container_status,
+                "cpu_percent": docker_check.cpu_percent,
+                "memory_percent": docker_check.memory_percent,
+            },
+            network_metrics={
+                "reachable": network_check.reachable,
+                "latency_ms": network_check.latency_ms,
+            },
+            business_metrics={
+                "runtime_available": business_check.runtime_available,
+                "context_percent": business_check.context_percent,
+            },
+            error_message="; ".join(issues) if issues else None
+        )
+
+        # Check for status change and send alerts
+        try:
+            from services.monitoring_alerts import get_alert_service
+            alert_service = get_alert_service()
+
+            # Get previous status from recent history
+            history = db.get_agent_health_history(agent_name, "aggregate", hours=1, limit=2)
+            if len(history) > 1:
+                previous_status = history[1].get("status", "unknown")
+                if previous_status != status.value:
+                    await alert_service.evaluate_and_alert(
+                        agent_name=agent_name,
+                        previous_status=previous_status,
+                        current_status=status.value,
+                        issues=issues,
+                        details={
+                            "docker_status": docker_check.container_status,
+                            "cpu_percent": docker_check.cpu_percent,
+                            "memory_percent": docker_check.memory_percent,
+                            "network_reachable": network_check.reachable,
+                            "latency_ms": network_check.latency_ms,
+                        }
+                    )
+
+            # Check for specific alert conditions
+            if docker_check.oom_killed:
+                await alert_service.alert_container_stopped(
+                    agent_name, docker_check.exit_code, oom_killed=True
+                )
+            elif docker_check.container_status not in ("running", "unknown", "not_found"):
+                await alert_service.alert_container_stopped(
+                    agent_name, docker_check.exit_code
+                )
+
+            if docker_check.restart_count and docker_check.restart_count > 3:
+                await alert_service.alert_high_restart_count(
+                    agent_name, docker_check.restart_count
+                )
+
+            if docker_check.cpu_percent and docker_check.cpu_percent > config.cpu_critical_percent:
+                await alert_service.alert_resource_critical(
+                    agent_name, "cpu", docker_check.cpu_percent
+                )
+
+            if docker_check.memory_percent and docker_check.memory_percent > config.memory_critical_percent:
+                await alert_service.alert_resource_critical(
+                    agent_name, "memory", docker_check.memory_percent
+                )
+
+        except Exception as e:
+            print(f"Failed to send monitoring alert: {e}")
+
+    # Get historical metrics
+    uptime = db.calculate_uptime_percent(agent_name, hours=24)
+    avg_latency = db.calculate_avg_latency(agent_name, hours=24)
+
+    return AgentHealthDetail(
+        agent_name=agent_name,
+        aggregate_status=status.value,
+        last_check_at=now,
+        docker=docker_check,
+        network=network_check,
+        business=business_check,
+        issues=issues,
+        recent_alerts=[],  # TODO: Fetch from notifications
+        uptime_percent_24h=round(uptime, 2) if uptime else None,
+        avg_latency_24h_ms=round(avg_latency, 2) if avg_latency else None
+    )
+
+
+async def perform_fleet_health_check(
+    agent_names: List[str],
+    config: MonitoringConfig = DEFAULT_CONFIG,
+    store_results: bool = True
+) -> FleetHealthStatus:
+    """
+    Perform health checks for multiple agents in parallel.
+
+    Returns:
+        FleetHealthStatus with summary and individual agent statuses
+    """
+    now = utc_now_iso()
+
+    # Run health checks in parallel with concurrency limit
+    semaphore = asyncio.Semaphore(10)  # Max 10 concurrent checks
+
+    async def check_with_limit(name: str) -> AgentHealthDetail:
+        async with semaphore:
+            return await perform_health_check(name, config, store_results)
+
+    results = await asyncio.gather(
+        *[check_with_limit(name) for name in agent_names],
+        return_exceptions=True
+    )
+
+    # Process results
+    agents = []
+    summary = FleetHealthSummary(total_agents=len(agent_names))
+
+    for i, result in enumerate(results):
+        agent_name = agent_names[i]
+
+        if isinstance(result, Exception):
+            # Handle check failure
+            agents.append(AgentHealthSummary(
+                name=agent_name,
+                status="unknown",
+                issues=[f"Check failed: {str(result)[:100]}"]
+            ))
+            summary.unknown += 1
+        else:
+            # Convert detail to summary
+            agents.append(AgentHealthSummary(
+                name=result.agent_name,
+                status=result.aggregate_status,
+                docker_status=result.docker.container_status if result.docker else None,
+                network_reachable=result.network.reachable if result.network else None,
+                runtime_available=result.business.runtime_available if result.business else None,
+                last_check_at=result.last_check_at,
+                issues=result.issues
+            ))
+
+            # Update summary counts
+            status = result.aggregate_status
+            if status == "healthy":
+                summary.healthy += 1
+            elif status == "degraded":
+                summary.degraded += 1
+            elif status == "unhealthy":
+                summary.unhealthy += 1
+            elif status == "critical":
+                summary.critical += 1
+            else:
+                summary.unknown += 1
+
+    return FleetHealthStatus(
+        enabled=True,
+        last_check_at=now,
+        summary=summary,
+        agents=agents
+    )
+
+
+# =========================================================================
+# Background Task Management
+# =========================================================================
+
+class MonitoringService:
+    """
+    Background service for periodic health checks.
+
+    Usage:
+        service = MonitoringService(config)
+        await service.start()
+        ...
+        await service.stop()
+    """
+
+    def __init__(self, config: MonitoringConfig = DEFAULT_CONFIG):
+        self.config = config
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    async def start(self):
+        """Start the monitoring background task."""
+        if self._running:
+            return
+
+        self._running = True
+        self._task = asyncio.create_task(self._run_loop())
+        print("Monitoring service started")
+
+    async def stop(self):
+        """Stop the monitoring background task."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        print("Monitoring service stopped")
+
+    async def _run_loop(self):
+        """Main monitoring loop."""
+        while self._running:
+            try:
+                await self._run_check_cycle()
+            except Exception as e:
+                print(f"Monitoring check cycle failed: {e}")
+
+            # Wait for next cycle
+            await asyncio.sleep(self.config.docker_check_interval)
+
+    async def _run_check_cycle(self):
+        """Run one cycle of health checks for all agents."""
+        from services.docker_service import list_all_agents_fast
+
+        # Get list of running agents
+        agents = list_all_agents_fast()
+        running_agents = [a.name for a in agents if a.status == "running"]
+
+        if not running_agents:
+            return
+
+        # Perform health checks
+        await perform_fleet_health_check(
+            running_agents,
+            self.config,
+            store_results=True
+        )
+
+        # Cleanup old records periodically (every hour)
+        # This is a simple implementation; could be more sophisticated
+        import random
+        if random.random() < 0.03:  # ~1 in 33 cycles (every ~15 min at 30s interval)
+            db.cleanup_old_health_records(days=7)
+
+
+# Global service instance
+_monitoring_service: Optional[MonitoringService] = None
+
+
+def get_monitoring_service() -> MonitoringService:
+    """Get or create the global monitoring service instance."""
+    global _monitoring_service
+    if _monitoring_service is None:
+        _monitoring_service = MonitoringService()
+    return _monitoring_service
+
+
+async def start_monitoring_service(config: MonitoringConfig = None):
+    """Start the global monitoring service."""
+    service = get_monitoring_service()
+    if config:
+        service.config = config
+    await service.start()
+
+
+async def stop_monitoring_service():
+    """Stop the global monitoring service."""
+    service = get_monitoring_service()
+    await service.stop()

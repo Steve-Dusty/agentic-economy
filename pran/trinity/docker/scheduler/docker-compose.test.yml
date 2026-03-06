@@ -1,0 +1,59 @@
+# Docker Compose for testing the scheduler service independently
+# Usage: docker compose -f docker/scheduler/docker-compose.test.yml up
+
+version: '3.8'
+
+services:
+  # Redis for distributed locking
+  redis:
+    image: redis:7-alpine
+    container_name: scheduler-test-redis
+    ports:
+      - "6399:6379"
+    volumes:
+      - scheduler-test-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - scheduler-test
+
+  # Scheduler service
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: docker/scheduler/Dockerfile
+    container_name: scheduler-test-service
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_PATH=/data/trinity.db
+      - REDIS_URL=redis://redis:6379
+      - HEALTH_PORT=8001
+      - LOG_LEVEL=DEBUG
+      - PUBLISH_EVENTS=true
+    volumes:
+      - scheduler-test-data:/data
+      # Mount source for development
+      - ../../src/scheduler:/app/scheduler:ro
+    ports:
+      - "8099:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+    networks:
+      - scheduler-test
+
+volumes:
+  scheduler-test-redis:
+  scheduler-test-data:
+
+networks:
+  scheduler-test:
+    driver: bridge

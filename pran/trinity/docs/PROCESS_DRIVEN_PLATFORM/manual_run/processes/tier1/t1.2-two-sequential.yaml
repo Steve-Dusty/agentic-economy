@@ -1,0 +1,49 @@
+# T1.2 - Two Sequential Steps
+# 
+# Purpose: Validate output passing between steps using template substitution
+# Agent: process-echo
+# Expected: Step 2 receives Step 1's output via {{steps.step1.output}}
+#
+# Test Validates:
+# - Dependency resolution (step2 waits for step1)
+# - Output storage between steps
+# - Template substitution works with real agent output
+# - Expression evaluation: {{steps.step1.output}}
+
+name: t1.2-two-sequential
+version: "1.0"
+description: "Two sequential steps test - validates output passing"
+
+triggers:
+  - type: webhook
+    id: manual-start
+
+steps:
+  - id: step1
+    name: First Step
+    type: agent_task
+    agent: process-echo
+    message: "Generate data for step 2"
+    timeout: 30s
+
+  - id: step2
+    name: Second Step
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - step1
+    message: "Received from step1: {{steps.step1.output}}"
+    timeout: 30s
+
+# Expected Flow:
+# 1. step1 executes, returns JSON with "input_received": "Generate data for step 2"
+# 2. step2 executes with message containing step1's full output
+# 3. step2's output.input_received should contain the substituted value
+
+# Verification Checklist:
+# [ ] step1 completes with output
+# [ ] step2 waits for step1 (not started until step1 completes)
+# [ ] step2 receives substituted message (contains step1 output)
+# [ ] step2 completes successfully
+# [ ] Both outputs retrievable via API
+# [ ] Template substitution visible in step2's stored message

@@ -1,0 +1,47 @@
+name: scout
+display_name: Scout - Market Research Analyst
+description: Market research specialist that discovers trends, analyzes competitors, and identifies opportunities
+type: research-agent
+priority: 20
+
+capabilities:
+  - web-search
+  - market-research
+  - competitor-analysis
+  - trend-detection
+  - report-generation
+
+commands:
+  - name: research
+    description: Research a specific topic or market
+    usage: /research [topic]
+  - name: competitors
+    description: Analyze competitors in a market segment
+    usage: /competitors [industry or company]
+  - name: trends
+    description: Identify current trends in a domain
+    usage: /trends [domain]
+  - name: opportunities
+    description: Find market opportunities
+    usage: /opportunities [market]
+  - name: status
+    description: Check recent research activity
+    usage: /status
+
+folders:
+  expose: true
+  consume: false
+
+metrics:
+  - name: research_reports
+    type: counter
+    description: Number of research reports generated
+  - name: markets_analyzed
+    type: counter
+    description: Number of markets analyzed
+  - name: opportunities_found
+    type: counter
+    description: Opportunities identified
+  - name: research_status
+    type: status
+    description: Current research status

@@ -1,0 +1,99 @@
+# T5.1 - 10-Step Sequential Chain
+# 
+# Purpose: Stress test long sequential chains
+# Agent: process-echo
+# Expected: All 10 steps complete in sequence
+
+name: t5.1-ten-step-chain
+version: "1.0"
+description: "Ten step chain test - validates long sequential processes"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: step-01
+    name: Step 01
+    type: agent_task
+    agent: process-echo
+    message: "Step 01: Starting chain"
+    timeout: 120s
+
+  - id: step-02
+    name: Step 02
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-01]
+    message: "Step 02: Continuing chain"
+    timeout: 120s
+
+  - id: step-03
+    name: Step 03
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-02]
+    message: "Step 03: Continuing chain"
+    timeout: 120s
+
+  - id: step-04
+    name: Step 04
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-03]
+    message: "Step 04: Continuing chain"
+    timeout: 120s
+
+  - id: step-05
+    name: Step 05
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-04]
+    message: "Step 05: Halfway through"
+    timeout: 120s
+
+  - id: step-06
+    name: Step 06
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-05]
+    message: "Step 06: Continuing chain"
+    timeout: 120s
+
+  - id: step-07
+    name: Step 07
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-06]
+    message: "Step 07: Continuing chain"
+    timeout: 120s
+
+  - id: step-08
+    name: Step 08
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-07]
+    message: "Step 08: Continuing chain"
+    timeout: 120s
+
+  - id: step-09
+    name: Step 09
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-08]
+    message: "Step 09: Almost done"
+    timeout: 120s
+
+  - id: step-10
+    name: Step 10
+    type: agent_task
+    agent: process-echo
+    depends_on: [step-09]
+    message: "Step 10: Final step"
+    timeout: 120s
+
+# Verification Checklist:
+# [ ] All 10 steps complete successfully
+# [ ] Steps execute in correct order
+# [ ] No memory issues or timeouts
+# [ ] Execution status: COMPLETED

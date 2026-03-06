@@ -1,0 +1,43 @@
+# O2: Approval Process for Onboarding Testing
+# Purpose: Test approval workflow and status explainers
+# Expected: Pauses at approval step, shows "awaiting approval" tooltip
+
+name: onboarding-test-approval
+version: "1.0"
+description: Process with approval step to test status tooltips and approval flow
+
+triggers:
+  - type: manual
+    id: manual-start
+
+steps:
+  - id: prepare
+    name: Prepare Content
+    type: agent_task
+    agent: test-echo
+    message: |
+      Generate a brief summary about the benefits of process automation.
+      Keep it to 2-3 sentences.
+    timeout: 5m
+
+  - id: review
+    name: Human Review
+    type: human_approval
+    depends_on: [prepare]
+    title: Review Generated Content
+    description: |
+      Please review the AI-generated content:
+
+      {{steps.prepare.output}}
+
+      Approve if the content is appropriate, or reject to regenerate.
+    timeout: 1h
+
+  - id: finalize
+    name: Finalize
+    type: agent_task
+    depends_on: [review]
+    agent: test-echo
+    message: |
+      The content has been approved. Confirm completion.
+    timeout: 5m

@@ -1,0 +1,94 @@
+# I2 - Multi-Stage Approval Chain
+#
+# Purpose: Test sequential approvals (Manager → Director)
+# Interaction: Two approval decisions required
+#
+# Expected Behavior:
+# - First: Manager reviews draft
+# - If approved: Director reviews
+# - If Director approves: Publish
+# - If either rejects: Process ends with rejection handling
+
+name: i2-multi-stage-approval
+version: "1.0"
+description: Two-stage approval chain (Manager then Director)
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: create-proposal
+    name: Create Proposal
+    type: agent_task
+    agent: process-worker
+    message: Create a detailed project proposal document
+    timeout: 120s
+
+  - id: manager-review
+    name: Manager Review (Stage 1)
+    type: human_approval
+    depends_on: [create-proposal]
+    description: |
+      STAGE 1 of 2: Manager Review
+
+      A project proposal has been created.
+      Please review and decide:
+
+      APPROVE: Forward to Director for final approval
+      REJECT: Return to team for revision
+    timeout: 30m
+    on_error:
+      action: skip_step
+
+  - id: director-review
+    name: Director Review (Stage 2)
+    type: human_approval
+    depends_on: [manager-review]
+    condition: steps.manager-review.output.decision == 'approved'
+    description: |
+      STAGE 2 of 2: Director Review
+
+      Manager has APPROVED this proposal.
+      As Director, please give final approval:
+
+      APPROVE: Project is greenlit and will proceed
+      REJECT: Project is declined
+    timeout: 30m
+    on_error:
+      action: skip_step
+
+  - id: project-approved
+    name: Project Approved
+    type: agent_task
+    agent: process-echo
+    depends_on: [director-review]
+    condition: steps.director-review.output.decision == 'approved'
+    message: PROJECT APPROVED by both Manager and Director - initiating kickoff
+    timeout: 120s
+
+  - id: manager-rejected
+    name: Manager Rejected
+    type: agent_task
+    agent: process-echo
+    depends_on: [manager-review]
+    condition: steps.manager-review.status == 'skipped'
+    message: Proposal rejected at Manager level - returning for revision
+    timeout: 120s
+
+  - id: director-rejected
+    name: Director Rejected
+    type: agent_task
+    agent: process-echo
+    depends_on: [director-review]
+    condition: steps.director-review.status == 'skipped'
+    message: Proposal rejected at Director level - project declined
+    timeout: 120s
+
+  - id: final-status
+    name: Final Status
+    type: agent_task
+    agent: process-echo
+    depends_on: [project-approved, manager-rejected, director-rejected]
+    message: Approval workflow complete - all decisions recorded
+    timeout: 120s

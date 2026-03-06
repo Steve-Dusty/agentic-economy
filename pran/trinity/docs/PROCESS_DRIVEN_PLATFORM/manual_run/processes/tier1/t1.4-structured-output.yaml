@@ -1,0 +1,75 @@
+# T1.4 - Step with Structured Output
+#
+# Purpose: Validate nested JSON output and deep path references
+# Agent: process-echo (with /structured command), process-worker
+# Expected: Nested paths like {{steps.X.output.level1.level2.level3.value}} work
+#
+# Test Validates:
+# - Agents can return complex nested JSON
+# - Expression evaluator handles deep paths
+# - Nested object references work in templates
+# - Array access in templates (if supported)
+
+name: t1.4-structured-output
+version: "1.0"
+description: "Structured output test - validates nested JSON and deep path references"
+
+triggers:
+  - type: webhook
+    id: manual-start
+
+steps:
+  - id: generate-structure
+    name: Generate Nested Structure
+    type: agent_task
+    agent: process-echo
+    message: "Return ONLY this JSON (no explanation): {\"level1\": {\"level2\": {\"level3\": {\"value\": \"deep-value\", \"array\": [1, 2, 3]}}}}"
+    timeout: 120s
+
+  - id: use-nested-value
+    name: Use Nested Value
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - generate-structure
+    message: "Echo back: {{steps.generate-structure.output}}"
+    timeout: 120s
+
+  - id: worker-analysis
+    name: Worker Analysis
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - generate-structure
+    message: "Analyze this structure: {{steps.generate-structure.output}}"
+    timeout: 120s
+
+  - id: combine-results
+    name: Combine Results
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - use-nested-value
+      - worker-analysis
+    message: "Summarize: nested-value came from step 1, worker analysis is done"
+    timeout: 120s
+
+# Expected Output from generate-structure:
+# {
+#   "level1": {
+#     "level2": {
+#       "level3": {
+#         "value": "deep-value",
+#         "array": [1, 2, 3]
+#       }
+#     }
+#   }
+# }
+
+# Verification Checklist:
+# [ ] generate-structure returns nested JSON
+# [ ] use-nested-value receives "deep-value" in its message
+# [ ] worker-analysis receives full structure
+# [ ] combine-results can reference paths from multiple upstream steps
+# [ ] No template substitution errors
+# [ ] All steps complete successfully

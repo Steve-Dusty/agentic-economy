@@ -1,0 +1,63 @@
+# T3.1 - Human Approval - Approved
+# 
+# Purpose: Validate human approval flow when approval is granted
+# Agent: process-echo, process-worker
+# Expected: Process pauses at approval, continues when approved
+#
+# Test Validates:
+# - human_approval step type works
+# - Execution pauses at approval step
+# - Approval API works to submit decision
+# - Process continues after approval
+# - Approval metadata available to downstream steps
+
+name: t3.1-approval-approved
+version: "1.0"
+description: "Human approval test - validates approved flow"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: draft
+    name: Create Draft
+    type: agent_task
+    agent: process-worker
+    message: "Create a draft document for review"
+    timeout: 120s
+
+  - id: review-approval
+    name: Review Approval
+    type: human_approval
+    depends_on:
+      - draft
+    title: "Draft Review Required"
+    description: "Please review the draft and approve or reject."
+    timeout: 5m
+    assignees:
+      - "test@example.com"
+
+  - id: publish
+    name: Publish
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - review-approval
+    message: "Publishing approved draft"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution - should pause at review-approval
+# 2. Check execution status: should have step WAITING_APPROVAL
+# 3. Get approval ID: GET /api/approvals?status=pending
+# 4. Submit approval: POST /api/approvals/{approval_id}/approve {"comment": "Looks good!"}
+# 5. Execution should continue to publish step
+# 6. Process completes
+
+# Verification Checklist:
+# [ ] draft step completes with content
+# [ ] Execution pauses at review-approval
+# [ ] Approval can be submitted via API
+# [ ] publish step runs after approval
+# [ ] Process completes with status COMPLETED

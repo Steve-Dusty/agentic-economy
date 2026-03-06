@@ -1,0 +1,35 @@
+name: vc-due-diligence
+display_name: VC Due Diligence Pipeline
+description: |
+  Comprehensive multi-agent venture capital due diligence process.
+  9 specialist agents analyze in parallel, synthesize findings,
+  and deliver investment recommendation with human approval gate.
+category: finance
+complexity: advanced
+version: "1.0.0"
+author: Trinity Demo
+
+tags:
+  - venture-capital
+  - due-diligence
+  - investment
+  - parallel-processing
+  - multi-agent
+
+step_types_used:
+  - agent_task
+  - human_approval
+  - gateway
+  - notification
+
+use_cases:
+  - "Series A due diligence"
+  - "Seed investment evaluation"
+  - "Strategic investment analysis"
+  - "M&A target assessment"
+
+prerequisites:
+  - "Deploy vc-due-diligence agent fleet via system manifest"
+  - "Agents: dd-intake, dd-founder, dd-market, dd-competitor, dd-tech, dd-bizmodel, dd-traction, dd-compliance, dd-captable, dd-legal, dd-lead"
+
+estimated_duration: "2-5 minutes (vs 2-4 weeks traditional)"

@@ -1,0 +1,72 @@
+# OpenTelemetry Collector Configuration for Trinity
+# Receives metrics from Claude Code agents and exports to Prometheus format
+
+extensions:
+  # Health check endpoint at :13133 for external monitoring
+  # Note: Docker healthcheck removed - distroless image has no shell/curl
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+processors:
+  # Batch metrics for efficient export
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Add Trinity metadata to all metrics
+  resource:
+    attributes:
+      - key: platform
+        value: trinity
+        action: upsert
+
+  # Convert delta temporality to cumulative for Prometheus compatibility
+  # Claude Code SDK sends delta metrics, but Prometheus requires cumulative
+  deltatocumulative:
+    max_stale: 10m  # Keep metric streams alive for 10 minutes after last data point
+    max_streams: 10000  # Maximum number of unique metric streams to track
+
+exporters:
+  # Prometheus exporter - scrape at :8889/metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: trinity
+    # NOTE: Don't use const_labels with resource_to_telemetry_conversion
+    # to avoid duplicate label conflicts
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug logging - useful for troubleshooting
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource, deltatocumulative]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info

@@ -1,0 +1,81 @@
+name: weekly-brief
+version: 1
+description: Weekly intelligence brief - compiles research into executive summary
+
+steps:
+  # Step 1: Scout gathers latest intelligence
+  - id: gather-intelligence
+    name: Gather Weekly Intelligence
+    type: agent_task
+    agent: acme-scout
+    message: |
+      Compile the weekly intelligence brief:
+
+      Topics to cover: {{input.topics}}
+
+      1. Review all research from the past week
+      2. Identify the top 5-7 most significant developments
+      3. Flag any urgent items requiring immediate attention
+      4. Note emerging trends worth monitoring
+
+      Save intelligence summary to /home/developer/shared-out/research/weekly/
+    timeout: 10m
+
+  # Step 2: Sage adds strategic commentary
+  - id: strategic-commentary
+    name: Add Strategic Commentary
+    type: agent_task
+    depends_on: gather-intelligence
+    agent: acme-sage
+    message: |
+      Add strategic commentary to the weekly intelligence:
+
+      1. Review Scout's weekly intelligence summary
+      2. Add "So What?" analysis for each key development
+      3. Identify strategic implications
+      4. Recommend any actions needed
+
+      Save to /home/developer/shared-out/strategy/weekly/
+    timeout: 10m
+
+  # Step 3: Scribe formats the executive brief
+  - id: format-brief
+    name: Format Executive Brief
+    type: agent_task
+    depends_on: strategic-commentary
+    agent: acme-scribe
+    message: |
+      Create the weekly executive intelligence brief:
+
+      1. Compile research and strategic commentary
+      2. Format as executive brief with:
+         - Key Headlines (bullets)
+         - Top Developments (with implications)
+         - Emerging Trends
+         - Action Items
+         - Looking Ahead
+
+      Keep it concise - max 2 pages.
+
+      Save to /home/developer/shared-out/deliverables/weekly-briefs/
+    timeout: 10m
+
+  # Step 4: Brief delay before notification
+  - id: review-window
+    name: Review Window
+    type: timer
+    depends_on: format-brief
+    delay: 1m
+
+  # Step 5: Notify stakeholders
+  - id: notify-ready
+    name: Notify Brief Ready
+    type: notification
+    depends_on: review-window
+    channel: webhook
+    message: Weekly Intelligence Brief is ready!
+
+outputs:
+  - name: brief_status
+    source: "{{steps.format-brief.output}}"
+    description: Brief creation status

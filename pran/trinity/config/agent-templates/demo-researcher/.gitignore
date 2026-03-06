@@ -1,0 +1,28 @@
+# Credentials - NEVER COMMIT
+.mcp.json
+.env
+*.pem
+*.key
+credentials.json
+
+# Platform-managed directories - DO NOT COMMIT
+.trinity/
+.claude/commands/trinity/
+
+# Large generated content - DO NOT COMMIT
+content/
+
+# Claude Code session data
+.claude/projects/
+.claude/statsig/
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+
+# Local overrides
+*.local.md
+*.local.json
+!.env.example
+!.mcp.json.template

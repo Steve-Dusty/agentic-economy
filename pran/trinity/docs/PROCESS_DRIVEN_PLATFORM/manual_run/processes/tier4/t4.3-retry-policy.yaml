@@ -1,0 +1,64 @@
+# T4.3 - Retry Policy Works
+# 
+# Purpose: Validate retry policy on transient failures
+# Agent: non-existent-agent (guaranteed failure)
+# Expected: Step retries configured times, then fails
+#
+# NOTE: Testing retry behavior with a guaranteed failure.
+# Cannot test "fail-then-succeed" pattern with stateless agents.
+
+name: t4.3-retry-policy
+version: "1.0"
+description: "Retry policy test - validates retry attempts and backoff"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: setup
+    name: Setup
+    type: agent_task
+    agent: process-echo
+    message: "Setting up retry test"
+    timeout: 120s
+
+  - id: flaky-step
+    name: Flaky Step (will fail and retry)
+    type: agent_task
+    agent: non-existent-agent
+    depends_on:
+      - setup
+    message: "This will fail because agent doesn't exist"
+    timeout: 60s
+    retry:
+      max_attempts: 3
+      initial_delay: 2s
+      backoff_multiplier: 2
+
+  - id: after-retry
+    name: After Retry (should not run)
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - flaky-step
+    message: "This should not execute since flaky-step always fails"
+    timeout: 120s
+
+# Expected Flow:
+# 1. setup completes
+# 2. flaky-step attempt 1: FAIL
+# 3. Wait ~2 seconds
+# 4. flaky-step attempt 2: FAIL
+# 5. Wait ~4 seconds
+# 6. flaky-step attempt 3: FAIL
+# 7. Step fails permanently
+# 8. Execution fails
+
+# Verification Checklist:
+# [ ] setup completes
+# [ ] flaky-step attempts retry (check logs for attempt count)
+# [ ] Backoff delays are respected
+# [ ] after-retry never runs
+# [ ] Execution status: FAILED
+# [ ] Total time shows retry attempts (~8+ seconds)

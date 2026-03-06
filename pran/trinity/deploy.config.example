@@ -1,0 +1,82 @@
+# Trinity Deployment Configuration
+# Copy this file to deploy.config and fill in your values
+# DO NOT commit deploy.config to git
+
+# ===========================================
+# GCP Configuration
+# ===========================================
+
+# Your GCP project ID
+GCP_PROJECT="your-gcp-project-id"
+
+# Zone where your VM is located
+GCP_ZONE="us-central1-a"
+
+# Name of your GCP VM instance
+GCP_INSTANCE="your-vm-name"
+
+# External IP of your VM (or leave empty to auto-detect)
+GCP_EXTERNAL_IP=""
+
+# ===========================================
+# Domain Configuration
+# ===========================================
+
+# Your domain name (e.g., trinity.example.com)
+DOMAIN="your-domain.com"
+
+# Backend URL (used for OAuth callbacks)
+BACKEND_URL="https://${DOMAIN}/api"
+
+# ===========================================
+# Port Configuration
+# ===========================================
+
+# Trinity services ports (standard ports for production)
+BACKEND_PORT="8000"
+FRONTEND_PORT="80"
+MCP_PORT="8080"
+
+# Agent SSH port range start (agents use consecutive ports)
+AGENT_SSH_PORT_START="2222"
+
+# ===========================================
+# Authentication
+# ===========================================
+
+# Admin password for dev mode (change this!)
+ADMIN_PASSWORD="changeme"
+
+# Secret key for JWT tokens (generate with: openssl rand -hex 32)
+SECRET_KEY=""
+
+# ===========================================
+# OAuth Credentials (optional, for Google/Slack integrations)
+# ===========================================
+
+# Google OAuth (get from Google Cloud Console)
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# Slack OAuth (get from Slack API)
+SLACK_CLIENT_ID=""
+SLACK_CLIENT_SECRET=""
+
+# GitHub OAuth (get from GitHub Developer Settings)
+GITHUB_CLIENT_ID=""
+GITHUB_CLIENT_SECRET=""
+
+# ===========================================
+# Remote Directory & Paths
+# ===========================================
+
+# Where Trinity is deployed on the remote VM
+REMOTE_DIR="~/trinity-platform"
+
+# Full paths on the remote host (required for docker-compose.prod.yml)
+# These are absolute paths to the config directories
+HOST_TEMPLATES_PATH="${REMOTE_DIR}/config/agent-templates"
+HOST_META_PROMPT_PATH="${REMOTE_DIR}/config/trinity-meta-prompt"
+
+# Where to store Trinity data (SQLite database)
+TRINITY_DATA_PATH="${REMOTE_DIR}/trinity-data"

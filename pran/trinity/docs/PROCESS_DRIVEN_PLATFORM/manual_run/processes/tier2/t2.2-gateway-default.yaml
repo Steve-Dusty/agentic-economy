@@ -1,0 +1,87 @@
+# T2.2 - Gateway with Default Route
+#
+# Purpose: Validate default route is taken when no conditions match
+# Agent: process-echo
+# Expected: When no conditions match, default route is taken
+#
+# Test Validates:
+# - Default route syntax works
+# - Default is only taken when no conditions match
+# - Process doesn't fail when no explicit condition matches
+
+name: t2.2-gateway-default
+version: "1.0"
+description: "Gateway default route test - validates fallback behavior"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+input:
+  category:
+    type: string
+    description: "Category value (use 'unknown' to trigger default)"
+    default: "unknown"
+
+steps:
+  - id: categorize
+    name: Categorize Input
+    type: agent_task
+    agent: process-echo
+    message: "Category is: {{input.category}}"
+    timeout: 120s
+
+  - id: category-router
+    name: Category Router
+    type: gateway
+    gateway_type: exclusive
+    depends_on:
+      - categorize
+    default_route: default-handler
+    routes:
+      - condition: "input.category == 'urgent'"
+        target: urgent-handler
+      - condition: "input.category == 'normal'"
+        target: normal-handler
+
+  - id: urgent-handler
+    name: Urgent Handler
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - category-router
+    condition: "steps.category-router.output.route == 'urgent-handler'"
+    message: "URGENT: Processing urgent category"
+    timeout: 120s
+
+  - id: normal-handler
+    name: Normal Handler
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - category-router
+    condition: "steps.category-router.output.route == 'normal-handler'"
+    message: "NORMAL: Processing normal category"
+    timeout: 120s
+
+  - id: default-handler
+    name: Default Handler
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - category-router
+    condition: "steps.category-router.output.route == 'default-handler'"
+    message: "DEFAULT: Unknown category, using fallback"
+    timeout: 120s
+
+# Test Scenarios:
+# 1. Input category="urgent": Should take urgent-handler
+# 2. Input category="normal": Should take normal-handler
+# 3. Input category="unknown": Should take default-handler
+# 4. Input category="anything-else": Should take default-handler
+
+# Verification Checklist:
+# [ ] Default route works when no condition matches
+# [ ] Explicit conditions still take precedence
+# [ ] Process doesn't fail with unmatched input
+# [ ] Default handler receives expected message

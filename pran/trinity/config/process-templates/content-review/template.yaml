@@ -1,0 +1,23 @@
+name: content-review
+display_name: Content Review Pipeline
+description: A multi-step content review workflow with AI analysis and human approval
+category: content
+complexity: intermediate
+version: "1.0"
+author: Trinity Examples
+
+tags:
+  - content
+  - review
+  - approval
+  - quality
+
+step_types_used:
+  - agent_task
+  - user_task
+  - condition
+
+use_cases:
+  - "Content moderation and approval workflows"
+  - "Quality assurance pipelines"
+  - "Editorial review processes"

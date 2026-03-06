@@ -1,0 +1,44 @@
+name: dd-compliance
+display_name: DD Compliance Agent
+description: Regulatory landscape analysis, compliance requirements, and market entry risks
+tagline: Navigating the rules
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+capabilities:
+  - regulatory-research
+  - compliance-assessment
+  - risk-analysis
+  - geographic-expansion
+
+use_cases:
+  - "Assess industry regulation level"
+  - "Evaluate compliance requirements"
+  - "Identify regulatory threats"
+  - "Analyze geographic expansion risks"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: compliance_reviews
+    type: counter
+    label: "Compliance Reviews"
+    description: "Total compliance assessments"
+
+  - name: analysis_status
+    type: status
+    label: "Status"
+    description: "Current analysis status"
+    values:
+      - value: "analyzing"
+        color: "blue"
+        label: "Analyzing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

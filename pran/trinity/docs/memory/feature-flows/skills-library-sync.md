@@ -1,0 +1,623 @@
+# Feature: Skills Library Sync
+
+## Overview
+Synchronizes a skills library from a GitHub repository to the local filesystem using git clone/pull operations. Enables platform administrators to maintain a centralized collection of reusable agent skills that can be assigned to agents.
+
+## User Story
+As a platform administrator, I want to configure and sync a GitHub repository containing skill definitions so that I can manage a centralized skills library and assign skills to agents.
+
+---
+
+## Entry Points
+
+| UI Location | API Endpoint | Purpose |
+|-------------|--------------|---------|
+| `src/frontend/src/views/Settings.vue:432-527` | `GET /api/skills/library/status` | Check library sync status |
+| `src/frontend/src/views/Settings.vue:501-512` | `POST /api/skills/library/sync` | Trigger library sync |
+| `src/frontend/src/views/Settings.vue:514-524` | `PUT /api/settings/{key}` | Save URL/branch settings |
+
+---
+
+## Frontend Layer
+
+### Component (`src/frontend/src/views/Settings.vue`)
+
+**Skills Library Section (lines 432-527)**
+
+The Settings page includes a "Skills Library" section with:
+1. Repository URL input field (line 448-459)
+2. Branch input field (line 462-476)
+3. Status display showing skill count, commit SHA, last sync time (lines 479-496)
+4. "Sync Library" and "Save Settings" buttons (lines 499-525)
+
+```vue
+<!-- Repository URL Input (line 448-459) -->
+<input
+  type="text"
+  id="skills-library-url"
+  v-model="skillsLibraryUrl"
+  placeholder="github.com/owner/skills-library"
+  class="..."
+/>
+
+<!-- Branch Input (line 468-475) -->
+<input
+  type="text"
+  id="skills-library-branch"
+  v-model="skillsLibraryBranch"
+  placeholder="main"
+  class="..."
+/>
+
+<!-- Status Display (line 479-496) -->
+<div v-if="skillsLibraryStatus.cloned" class="...">
+  <span>{{ skillsLibraryStatus.skill_count }} skills available</span>
+  <span v-if="skillsLibraryStatus.commit_sha">
+    Commit: <code>{{ skillsLibraryStatus.commit_sha }}</code>
+  </span>
+  <span v-if="skillsLibraryStatus.last_sync">
+    Last synced: {{ formatDate(skillsLibraryStatus.last_sync) }}
+  </span>
+</div>
+```
+
+### State Management (`src/frontend/src/views/Settings.vue:642-653`)
+
+```javascript
+// Skills Library state
+const skillsLibraryUrl = ref('')
+const skillsLibraryBranch = ref('main')
+const skillsLibraryStatus = ref({
+  configured: false,
+  cloned: false,
+  skill_count: 0,
+  commit_sha: null,
+  last_sync: null
+})
+const syncingSkillsLibrary = ref(false)
+const savingSkillsLibrary = ref(false)
+```
+
+### Load Settings (`src/frontend/src/views/Settings.vue:968-979`)
+
+```javascript
+async function loadSkillsLibrarySettings() {
+  try {
+    const response = await axios.get('/api/skills/library/status', {
+      headers: authStore.authHeader
+    })
+    skillsLibraryStatus.value = response.data
+    skillsLibraryUrl.value = response.data.url || ''
+    skillsLibraryBranch.value = response.data.branch || 'main'
+  } catch (e) {
+    console.error('Failed to load skills library status:', e)
+  }
+}
+```
+
+### Save Settings (`src/frontend/src/views/Settings.vue:981-1009`)
+
+```javascript
+async function saveSkillsLibrarySettings() {
+  savingSkillsLibrary.value = true
+  error.value = null
+
+  try {
+    // Save URL setting
+    if (skillsLibraryUrl.value.trim()) {
+      await settingsStore.updateSetting('skills_library_url', skillsLibraryUrl.value.trim())
+    } else {
+      await settingsStore.deleteSetting('skills_library_url')
+    }
+
+    // Save branch setting
+    if (skillsLibraryBranch.value.trim() && skillsLibraryBranch.value !== 'main') {
+      await settingsStore.updateSetting('skills_library_branch', skillsLibraryBranch.value.trim())
+    } else {
+      await settingsStore.deleteSetting('skills_library_branch')
+    }
+
+    showSuccess.value = true
+    setTimeout(() => { showSuccess.value = false }, 3000)
+  } catch (e) {
+    error.value = e.response?.data?.detail || 'Failed to save skills library settings'
+  } finally {
+    savingSkillsLibrary.value = false
+  }
+}
+```
+
+### Sync Library (`src/frontend/src/views/Settings.vue:1011-1036`)
+
+```javascript
+async function syncSkillsLibrary() {
+  syncingSkillsLibrary.value = true
+  error.value = null
+
+  try {
+    // Save settings first
+    await saveSkillsLibrarySettings()
+
+    // Then sync
+    const response = await axios.post('/api/skills/library/sync', {}, {
+      headers: authStore.authHeader
+    })
+
+    // Reload status
+    await loadSkillsLibrarySettings()
+
+    showSuccess.value = true
+    setTimeout(() => { showSuccess.value = false }, 3000)
+  } catch (e) {
+    error.value = e.response?.data?.detail || 'Failed to sync skills library'
+  } finally {
+    syncingSkillsLibrary.value = false
+  }
+}
+```
+
+### Store (`src/frontend/src/stores/settings.js:66-80`)
+
+```javascript
+async updateSetting(key, value) {
+  this.saving = true
+  this.error = null
+
+  try {
+    const response = await axios.put(`/api/settings/${key}`, { value })
+    this.settings[key] = response.data.value
+    return response.data
+  } catch (error) {
+    console.error(`Failed to update setting ${key}:`, error)
+    this.error = error.response?.data?.detail || 'Failed to update setting'
+    throw error
+  } finally {
+    this.saving = false
+  }
+}
+```
+
+---
+
+## Backend Layer
+
+### Router (`src/backend/routers/skills.py`)
+
+**Status Endpoint (lines 49-57)**
+
+```python
+@router.get("/skills/library/status")
+async def get_library_status(current_user: User = Depends(get_current_user)):
+    """
+    Get the current status of the skills library.
+
+    Returns configuration status, sync info, and skill count.
+    """
+    return skill_service.get_library_status()
+```
+
+**Sync Endpoint (lines 73-87)**
+
+```python
+@router.post("/skills/library/sync")
+async def sync_library(admin_user: User = Depends(require_admin)):
+    """
+    Sync the skills library from GitHub.
+
+    Admin-only. Clones or pulls the configured repository.
+    """
+    result = skill_service.sync_library()
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("error", "Sync failed")
+        )
+    return result
+```
+
+### Service (`src/backend/services/skill_service.py`)
+
+**Sync Library Method (lines 51-114)**
+
+```python
+def sync_library(self) -> Dict[str, Any]:
+    """
+    Sync the skills library from GitHub.
+
+    Clones the repository if it doesn't exist, or pulls latest changes.
+    Uses GitHub PAT for private repository access.
+
+    Returns:
+        Dict with sync status, commit info, and skill count
+    """
+    url = get_skills_library_url()
+    if not url:
+        return {
+            "success": False,
+            "error": "Skills library URL not configured",
+            "hint": "Configure skills_library_url in Settings"
+        }
+
+    branch = get_skills_library_branch()
+    github_pat = get_github_pat()
+
+    # Construct authenticated URL for private repos
+    if github_pat and "github.com" in url:
+        # Handle various URL formats
+        if url.startswith("https://"):
+            auth_url = url.replace("https://", f"https://{github_pat}@")
+        elif url.startswith("github.com"):
+            auth_url = f"https://{github_pat}@{url}"
+        else:
+            auth_url = f"https://{github_pat}@github.com/{url}"
+    else:
+        # Public repo or no PAT
+        if not url.startswith("https://"):
+            auth_url = f"https://github.com/{url}"
+        else:
+            auth_url = url
+
+    # Log without exposing PAT
+    safe_url = re.sub(r'https://[^@]+@', 'https://***@', auth_url)
+    logger.info(f"Syncing skills library from {safe_url} (branch: {branch})")
+
+    try:
+        if self.library_path.exists():
+            # Pull latest changes
+            result = self._git_pull(branch)
+        else:
+            # Clone repository
+            result = self._git_clone(auth_url, branch)
+
+        if result["success"]:
+            self._last_sync = datetime.utcnow()
+            self._last_commit_sha = self._get_current_commit()
+            result["commit_sha"] = self._last_commit_sha
+            result["skill_count"] = len(self.list_skills())
+            result["last_sync"] = self._last_sync.isoformat()
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to sync skills library: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+```
+
+**Git Clone Method (lines 116-132)**
+
+```python
+def _git_clone(self, url: str, branch: str) -> Dict[str, Any]:
+    """Clone the skills library repository."""
+    self.library_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = ["git", "clone", "--branch", branch, "--depth", "1", url, str(self.library_path)]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+        logger.info(f"Cloned skills library to {self.library_path}")
+        return {"success": True, "action": "cloned"}
+    except subprocess.CalledProcessError as e:
+        # Sanitize error output to remove PAT
+        error_msg = re.sub(r'https://[^@]+@', 'https://***@', e.stderr or str(e))
+        logger.error(f"Git clone failed: {error_msg}")
+        return {"success": False, "error": f"Clone failed: {error_msg}"}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Clone timed out after 120 seconds"}
+```
+
+**Git Pull Method (lines 134-161)**
+
+```python
+def _git_pull(self, branch: str) -> Dict[str, Any]:
+    """Pull latest changes from the skills library."""
+    try:
+        # Fetch and reset to remote branch
+        subprocess.run(
+            ["git", "fetch", "origin", branch],
+            cwd=self.library_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        subprocess.run(
+            ["git", "reset", "--hard", f"origin/{branch}"],
+            cwd=self.library_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        logger.info(f"Pulled latest skills library changes")
+        return {"success": True, "action": "pulled"}
+    except subprocess.CalledProcessError as e:
+        error_msg = re.sub(r'https://[^@]+@', 'https://***@', e.stderr or str(e))
+        logger.error(f"Git pull failed: {error_msg}")
+        return {"success": False, "error": f"Pull failed: {error_msg}"}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Pull timed out"}
+```
+
+**Get Library Status (lines 271-294)**
+
+```python
+def get_library_status(self) -> Dict[str, Any]:
+    """
+    Get the current status of the skills library.
+
+    Returns:
+        Dict with configuration status, sync info, and skill count
+    """
+    url = get_skills_library_url()
+    branch = get_skills_library_branch()
+
+    status = {
+        "configured": bool(url),
+        "url": url,
+        "branch": branch,
+        "cloned": self.library_path.exists(),
+        "last_sync": self._last_sync.isoformat() if self._last_sync else None,
+        "commit_sha": self._last_commit_sha or self._get_current_commit(),
+        "skill_count": 0
+    }
+
+    if self.library_path.exists():
+        status["skill_count"] = len(self.list_skills())
+
+    return status
+```
+
+### Settings Service (`src/backend/services/settings_service.py`)
+
+**Skills Library Settings (lines 141-163)**
+
+```python
+def get_skills_library_url() -> Optional[str]:
+    """
+    Get the skills library GitHub repository URL.
+
+    Returns None if not configured (feature disabled).
+
+    Example: "github.com/Abilityai/skills-library-41"
+    """
+    return settings_service.get_setting('skills_library_url')
+
+
+def get_skills_library_branch() -> str:
+    """
+    Get the skills library branch to use.
+
+    Default: "main"
+    """
+    return settings_service.get_setting('skills_library_branch', 'main')
+```
+
+**GitHub PAT Retrieval (lines 71-76)**
+
+```python
+def get_github_pat(self) -> str:
+    """Get GitHub PAT from settings, fallback to env var."""
+    key = self.get_setting('github_pat')
+    if key:
+        return key
+    return os.getenv('GITHUB_PAT', '')
+```
+
+---
+
+## Data Flow
+
+### 1. User Configures Settings
+```
+User enters URL/branch in Settings.vue
+    -> saveSkillsLibrarySettings()
+    -> PUT /api/settings/skills_library_url
+    -> PUT /api/settings/skills_library_branch
+    -> system_settings table updated
+```
+
+### 2. User Clicks Sync
+```
+User clicks "Sync Library" button
+    -> syncSkillsLibrary()
+    -> POST /api/skills/library/sync (admin-only)
+    -> skill_service.sync_library()
+    -> get_skills_library_url() (from settings_service)
+    -> get_skills_library_branch() (from settings_service)
+    -> get_github_pat() (for private repos)
+    -> _git_clone() or _git_pull()
+    -> _get_current_commit()
+    -> list_skills()
+    -> Return sync result
+```
+
+### 3. Status Display
+```
+Page loads or sync completes
+    -> loadSkillsLibrarySettings()
+    -> GET /api/skills/library/status
+    -> skill_service.get_library_status()
+    -> UI updates with skill count, commit SHA, last sync time
+```
+
+---
+
+## File System Structure
+
+### Local Storage Path
+
+```
+/data/skills-library/           <- SKILLS_LIBRARY_PATH constant
+├── .git/                       <- Git repository data
+├── .claude/
+│   └── skills/
+│       ├── skill-name-1/
+│       │   └── SKILL.md        <- Skill definition
+│       ├── skill-name-2/
+│       │   └── SKILL.md
+│       └── ...
+└── README.md                   <- Optional repository docs
+```
+
+### Skills Discovery (`src/backend/services/skill_service.py:182-205`)
+
+```python
+def list_skills(self) -> List[Dict[str, Any]]:
+    """
+    List all available skills from the library.
+
+    Scans .claude/skills/*/SKILL.md files.
+    """
+    skills = []
+    skills_dir = self.library_path / ".claude" / "skills"
+
+    if not skills_dir.exists():
+        logger.debug(f"Skills directory not found: {skills_dir}")
+        return skills
+
+    for skill_path in skills_dir.iterdir():
+        if skill_path.is_dir():
+            skill_file = skill_path / "SKILL.md"
+            if skill_file.exists():
+                skill_info = self._parse_skill_info(skill_path.name, skill_file)
+                skills.append(skill_info)
+
+    return sorted(skills, key=lambda s: s["name"])
+```
+
+---
+
+## Database Schema
+
+### system_settings Table
+
+```sql
+-- Settings stored via PUT /api/settings/{key}
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+
+-- Relevant keys:
+-- 'skills_library_url'    -> "github.com/owner/repo"
+-- 'skills_library_branch' -> "main"
+-- 'github_pat'            -> "ghp_..." (for private repos)
+```
+
+---
+
+## Error Handling
+
+| Error Case | HTTP Status | Message |
+|------------|-------------|---------|
+| URL not configured | 400 | "Skills library URL not configured" |
+| Clone failed | 400 | "Clone failed: {error}" |
+| Pull failed | 400 | "Pull failed: {error}" |
+| Clone timeout | 400 | "Clone timed out after 120 seconds" |
+| Pull timeout | 400 | "Pull timed out" |
+| Non-admin user | 403 | "Admin access required" |
+| Invalid branch | 400 | Git error message (branch not found) |
+
+---
+
+## Security Considerations
+
+1. **Admin-Only Sync**: The `POST /api/skills/library/sync` endpoint requires `require_admin` dependency
+2. **PAT Protection**: GitHub PAT is never logged - sanitized with `re.sub(r'https://[^@]+@', 'https://***@', ...)`
+3. **Shallow Clone**: Uses `--depth 1` to minimize data transfer and avoid cloning full history
+4. **Timeout Protection**: Clone has 120s timeout, pull has 60s timeout to prevent hanging
+5. **Command Injection**: Uses subprocess with list arguments, not shell=True
+
+---
+
+## Testing
+
+### Prerequisites
+- [ ] Backend running at http://localhost:8000
+- [ ] Frontend running at http://localhost:3000
+- [ ] Logged in as admin user
+- [ ] GitHub repository with `.claude/skills/*/SKILL.md` structure
+
+### Test Steps
+
+#### 1. Configure Skills Library
+**Action**:
+- Navigate to http://localhost/settings
+- Scroll to "Skills Library" section
+- Enter repository URL: `github.com/your-org/skills-library`
+- Enter branch: `main`
+- Click "Save Settings"
+
+**Verify**:
+- [ ] Success message appears
+- [ ] GET `/api/settings/skills_library_url` returns the URL
+- [ ] GET `/api/settings/skills_library_branch` returns "main"
+
+#### 2. Initial Sync (Clone)
+**Action**:
+- Click "Sync Library" button
+- Wait for sync to complete
+
+**Verify**:
+- [ ] Loading spinner shows during sync
+- [ ] Success message appears
+- [ ] Status shows skill count > 0
+- [ ] Status shows commit SHA (12 characters)
+- [ ] Status shows "Last synced: Today" or similar
+- [ ] `/data/skills-library/.claude/skills/` contains SKILL.md files
+
+#### 3. Subsequent Sync (Pull)
+**Action**:
+- Click "Sync Library" again
+
+**Verify**:
+- [ ] Sync completes successfully
+- [ ] Uses git pull (not clone)
+- [ ] Skill count updates if repository changed
+- [ ] Commit SHA updates if new commits
+
+#### 4. Private Repository
+**Action**:
+- Configure GitHub PAT in Settings -> API Keys
+- Configure a private repository URL
+- Click "Sync Library"
+
+**Verify**:
+- [ ] Clone succeeds with authentication
+- [ ] PAT is NOT visible in logs or error messages
+- [ ] Skills are loaded from private repo
+
+#### 5. Error Cases
+**Action**: Test various error scenarios
+
+**Verify**:
+- [ ] No URL configured -> "Skills library URL not configured"
+- [ ] Invalid URL -> "Clone failed: ..." with sanitized error
+- [ ] Invalid branch -> Git error message
+- [ ] Non-admin user -> 403 Forbidden
+
+---
+
+## Related Flows
+
+- **Upstream**: [platform-settings.md](platform-settings.md) - GitHub PAT configuration
+- **Downstream**: [skill-injection.md](skill-injection.md) - Injecting skills into agents
+- **Downstream**: [agent-skill-assignment.md](agent-skill-assignment.md) - Assigning skills to agents
+- **Related**: [skills-crud.md](skills-crud.md) - Creating/managing skills via UI
+
+---
+
+## Revision History
+
+| Date | Changes |
+|------|---------|
+| 2026-01-25 | **Initial document creation**: Complete vertical slice from Settings.vue through skill_service.py git operations. Documented URL formats, shallow clone, PAT handling, status endpoint, error cases. |
+
+---
+
+**Last Updated**: 2026-01-25
+**Status**: Verified - All file paths and line numbers confirmed accurate

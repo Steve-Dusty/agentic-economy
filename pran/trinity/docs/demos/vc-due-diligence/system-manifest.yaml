@@ -1,0 +1,208 @@
+# =============================================================================
+# AI Venture Capital Due Diligence Team - System Manifest
+# =============================================================================
+# Deploy with: POST /api/system-manifest
+#
+# "9 analysts. 60 seconds. One verdict."
+#
+# This manifest deploys a complete AI due diligence team:
+# - 1 Intake Agent (parses pitch decks)
+# - 9 Specialist Agents (parallel analysis)
+# - 1 Deal Lead Agent (synthesis & recommendation)
+#
+# After deployment, assign skills via:
+#   POST /api/agents/{name}/skills (see Skills section below)
+# =============================================================================
+
+name: vc-due-diligence
+description: |
+  AI Venture Capital Due Diligence Team
+
+  A multi-agent system that performs comprehensive startup due diligence in parallel,
+  synthesizes findings, and delivers an investment recommendation with one human approval gate.
+
+  What takes a VC firm 2-4 weeks happens in 60 seconds.
+
+# =============================================================================
+# SYSTEM-WIDE PROMPT
+# =============================================================================
+# Injected into all agents' CLAUDE.md
+# Note: Detailed methodologies are now in skills (dd-verification, dd-sourcing, etc.)
+prompt: |
+  You are part of a world-class venture capital due diligence team.
+
+  ## Your Mission
+  Provide thorough, unbiased analysis to help make informed investment decisions
+  worth millions of dollars. Your job is to find the truth, not validate pitches.
+
+  ## Platform Skills
+  You have been assigned skills that define your methodologies:
+  - `/dd-verification` - Fact-checking with confidence levels
+  - `/dd-sourcing` - Source documentation standards
+  - `/dd-report-format` - Standard JSON output format
+
+  Use these skills. They ensure consistency across all specialist agents.
+
+  ## Collaboration
+  You are part of a team. Save your analysis to the shared folder so other agents
+  can access it. Use consistent formats for machine processing by the Deal Lead.
+
+# =============================================================================
+# AGENT FLEET
+# =============================================================================
+agents:
+  # ---------------------------------------------------------------------------
+  # INTAKE AGENT - Parses pitch decks and routes to specialists
+  # ---------------------------------------------------------------------------
+  dd-intake:
+    template: local:dd-intake
+    resources:
+      memory: "2g"
+      cpu: "1"
+
+  # ---------------------------------------------------------------------------
+  # SPECIALIST AGENTS - Run in parallel
+  # ---------------------------------------------------------------------------
+
+  # Founder & Team Analysis
+  dd-founder:
+    template: local:dd-founder
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # Market Research & Validation
+  dd-market:
+    template: local:dd-market
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # Competitive Intelligence
+  dd-competitor:
+    template: local:dd-competitor
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # Technical Due Diligence
+  dd-tech:
+    template: local:dd-tech
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # Business Model Analysis
+  dd-bizmodel:
+    template: local:dd-bizmodel
+    resources:
+      memory: "2g"
+      cpu: "1"
+
+  # Traction & Financials
+  dd-traction:
+    template: local:dd-traction
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # Regulatory Compliance
+  dd-compliance:
+    template: local:dd-compliance
+    resources:
+      memory: "2g"
+      cpu: "1"
+
+  # Cap Table Analysis
+  dd-captable:
+    template: local:dd-captable
+    resources:
+      memory: "2g"
+      cpu: "1"
+
+  # Legal Review
+  dd-legal:
+    template: local:dd-legal
+    resources:
+      memory: "4g"
+      cpu: "2"
+
+  # ---------------------------------------------------------------------------
+  # DEAL LEAD - Synthesizes all findings and makes recommendation
+  # ---------------------------------------------------------------------------
+  dd-lead:
+    template: local:dd-lead
+    resources:
+      memory: "8g"
+      cpu: "4"
+
+# =============================================================================
+# PERMISSIONS - Configured Post-Deployment
+# =============================================================================
+# NOTE: Permissions must be configured AFTER deployment via API or UI.
+# The manifest deployment creates agents but permissions require a separate step.
+#
+# See README.md "Configure Permissions" section for the setup script.
+#
+# Permission structure:
+#   - dd-lead (orchestrator) can call ALL other agents
+#   - dd-intake can distribute to all specialists
+#   - dd-legal can call dd-lead (for term sheet coordination)
+#
+# This enables dd-lead to use mcp__trinity__chat_with_agent to delegate
+# tasks to specialists, which creates arrows on the Dashboard Timeline.
+
+# =============================================================================
+# SHARED FOLDERS - All agents write to shared folder for handoff
+# =============================================================================
+folders:
+  shared: true
+  # All agents can write to shared folder for document handoff
+  # Structure:
+  #   /shared-out/extractions/     - Intake agent output
+  #   /shared-out/founder-analysis/
+  #   /shared-out/market-analysis/
+  #   /shared-out/competitor-analysis/
+  #   /shared-out/tech-analysis/
+  #   /shared-out/bizmodel-analysis/
+  #   /shared-out/traction-analysis/
+  #   /shared-out/compliance-analysis/
+  #   /shared-out/captable-analysis/
+  #   /shared-out/legal-analysis/
+  #   /shared-out/investment-recommendation/
+
+# =============================================================================
+# AUTO-START - All agents start automatically after deployment
+# =============================================================================
+auto_start: true
+
+# =============================================================================
+# SKILLS ASSIGNMENT (Post-Deployment)
+# =============================================================================
+# After deploying the manifest, assign skills to agents using the API or UI.
+#
+# Recommended skill assignments:
+#
+# ALL SPECIALISTS (dd-founder, dd-market, dd-competitor, dd-tech, dd-bizmodel,
+#                  dd-traction, dd-compliance, dd-captable, dd-legal):
+#   - dd-verification    (claim verification methodology)
+#   - dd-sourcing        (source documentation standards)
+#   - dd-report-format   (consistent JSON output format)
+#
+# DEAL LEAD ONLY (dd-lead):
+#   - dd-verification    (claim verification methodology)
+#   - dd-sourcing        (source documentation standards)
+#   - dd-report-format   (consistent JSON output format)
+#   - dd-risk-scoring    (weighted risk calculation)
+#   - dd-synthesis       (multi-source synthesis)
+#
+# To assign skills via API:
+#   PUT /api/agents/dd-founder/skills
+#   {"skills": ["dd-verification", "dd-sourcing", "dd-report-format"]}
+#
+# To assign skills via UI:
+#   Agents → dd-founder → Skills tab → Check skills → Save
+#
+# To inject skills to running agents:
+#   POST /api/agents/dd-founder/skills/inject
+# =============================================================================

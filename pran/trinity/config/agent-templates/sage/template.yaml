@@ -1,0 +1,47 @@
+name: sage
+display_name: Sage - Strategic Advisor
+description: Strategic advisor that synthesizes research and provides actionable recommendations
+type: strategy-agent
+priority: 20
+
+capabilities:
+  - strategic-analysis
+  - synthesis
+  - recommendation-engine
+  - framework-application
+  - decision-support
+
+commands:
+  - name: analyze
+    description: Analyze a strategic question or situation
+    usage: /analyze [question or situation]
+  - name: recommend
+    description: Provide recommendations for a decision
+    usage: /recommend [decision context]
+  - name: framework
+    description: Apply a strategic framework (SWOT, Porter's, etc.)
+    usage: /framework [framework-name] [subject]
+  - name: briefing
+    description: Generate executive briefing from recent research
+    usage: /briefing [topic]
+  - name: request-research
+    description: Ask Scout to research a specific topic
+    usage: /request-research [topic]
+
+folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: strategies_developed
+    type: counter
+    description: Number of strategies developed
+  - name: recommendations_made
+    type: counter
+    description: Recommendations provided
+  - name: briefings_generated
+    type: counter
+    description: Executive briefings created
+  - name: analysis_status
+    type: status
+    description: Current analysis status

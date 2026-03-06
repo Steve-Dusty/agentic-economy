@@ -1,0 +1,60 @@
+# T4.2 - Agent Timeout
+# 
+# Purpose: Validate timeout handling when agent takes too long
+# Agent: process-worker (with a task that takes a while)
+# Expected: Step times out, execution fails
+
+name: t4.2-agent-timeout
+version: "1.0"
+description: "Agent timeout test - validates timeout handling"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: setup
+    name: Setup
+    type: agent_task
+    agent: process-echo
+    message: "Setting up timeout test"
+    timeout: 120s
+
+  - id: slow-step
+    name: Slow Step (will timeout)
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - setup
+    message: |
+      Please perform an extremely detailed and comprehensive analysis of the following:
+      1. Generate a 10,000 word essay on the history of computing
+      2. Include full citations and references for every claim
+      3. Add detailed technical diagrams in ASCII art
+      4. Review and revise the essay 5 times
+      This task is designed to take a long time.
+    timeout: 30s  # Short timeout - Claude will likely exceed this
+
+  - id: after-timeout
+    name: After Timeout (should not run)
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - slow-step
+    message: "This should not execute"
+    timeout: 120s
+
+# Expected Flow:
+# 1. setup completes
+# 2. slow-step starts processing
+# 3. After 30 seconds, step times out
+# 4. Execution fails
+
+# Verification Checklist:
+# [ ] setup completes
+# [ ] slow-step starts and processes
+# [ ] After ~30 seconds, timeout triggers
+# [ ] slow-step status: FAILED
+# [ ] Error code: TIMEOUT
+# [ ] after-timeout never runs
+# [ ] Execution status: FAILED

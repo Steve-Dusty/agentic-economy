@@ -1,0 +1,133 @@
+═══════════════════════════════════════════════════════════════════════════════
+  TRINITY PLATFORM - COMPREHENSIVE TESTING FRAMEWORK
+  Phase-Based Modular Testing Structure
+═══════════════════════════════════════════════════════════════════════════════
+
+QUICK START GUIDE
+─────────────────────────────────────────────────────────────────────────────
+
+📍 LOCATION: docs/testing/phases/
+
+📋 13 PHASES (0-12) - 165 minutes total
+   Phase 0:  Setup (5 min)
+   Phase 1:  Authentication (5 min)
+   Phase 2:  Agent Creation (30 min) ⚠️ CRITICAL: GitHub templates only
+   Phase 3:  Context Validation (10 min) ⚠️ CRITICAL: Bug tracking
+   Phase 4:  State Persistence (10 min)
+   Phase 5:  Agent Collaboration (15 min)
+   Phase 6:  Workplan System (20 min)
+   Phase 7:  Scheduling (15 min)
+   Phase 8:  Execution Queue (15 min)
+   Phase 9:  File Browser (10 min)
+   Phase 10: Error Handling (10 min)
+   Phase 11: Multi-Agent Dashboard (10 min)
+   Phase 12: Cleanup (5 min)
+
+📖 GUIDES
+─────────────────────────────────────────────────────────────────────────────
+START HERE:
+  1. docs/testing/phases/README.md
+     → Quick reference, phase sequence, common issues
+
+THEN:
+  2. docs/testing/phases/PHASE_00_SETUP.md
+     → First phase, follows Action→Expected→Verify format
+
+REFERENCE:
+  • docs/testing/phases/INDEX.md (complete overview)
+  • docs/testing/MODULAR_TESTING_STRUCTURE.md (how it works)
+  • docs/testing/TESTING_FRAMEWORK_COMPLETE.md (this framework explained)
+
+🚀 HOW TO TEST
+─────────────────────────────────────────────────────────────────────────────
+
+MANUAL TESTING:
+  1. Open: docs/testing/phases/README.md
+  2. Open: docs/testing/phases/PHASE_00_SETUP.md
+  3. Follow each test step: Action → Expected → Verify
+  4. Take screenshots for verification
+  5. Check success criteria
+  6. Move to Phase 01, then 02, etc.
+
+AUTOMATED (Sub-Agent):
+  1. Invoke: "Run phase 0 of the Trinity testing suite"
+  2. Sub-agent reads PHASE_00_SETUP.md and executes automatically
+  3. Invoke: "Run phase 1 of the Trinity testing suite"
+  4. Continue for all phases 0-12
+
+⚠️  CRITICAL VALIDATIONS
+─────────────────────────────────────────────────────────────────────────────
+
+GITHUB TEMPLATES (Phase 2) - MUST VALIDATE:
+  All 8 agents MUST use: github:abilityai/test-agent-*
+  NEVER use: local:test-*
+  
+  Check with: docker inspect agent-test-echo --format='{{index .Config.Labels "trinity.template"}}'
+  
+  If ANY agent shows "local:test-*", Phase 2 FAILS immediately.
+
+CONTEXT % TRACKING (Phase 3) - DOCUMENT BUG STATUS:
+  Context % should increase → ✅ Good (no bug)
+  Context % stuck at 0% → ⚠️ Known bug (document and continue)
+  
+  Progress bar should fill and change colors: Green→Yellow→Orange→Red
+
+TASK INDICATOR (Phase 3) - VERIFY PLANS TAB:
+  Should show: "Task 1/4" or actual task names
+  If showing "—", that's known issue, check Plans tab instead
+
+✅ 8 TEST AGENTS COVERED
+─────────────────────────────────────────────────────────────────────────────
+  1. test-echo      → Chat responses
+  2. test-counter   → State persistence
+  3. test-delegator → Agent delegation
+  4. test-worker    → Workplan execution
+  5. test-scheduler → Schedule autonomy
+  6. test-queue     → Queue management
+  7. test-files     → File operations
+  8. test-error     → Error handling
+
+📊 EACH PHASE INCLUDES
+─────────────────────────────────────────────────────────────────────────────
+  • Purpose & Duration
+  • Prerequisites (what must PASS first)
+  • Test Steps (5-12 specific steps)
+  • Critical Validations
+  • Success Criteria (clear pass/fail)
+  • Troubleshooting section
+  • Next Phase reference
+
+🎯 SUCCESS CRITERIA
+─────────────────────────────────────────────────────────────────────────────
+Phase is PASSED when ALL success criteria are met.
+Phase is PARTIAL if known bugs found but documented.
+Phase is FAILED if any critical requirement not met.
+
+Full test run is SUCCESSFUL when all 13 phases complete with status PASSED.
+
+📈 WHAT GETS TESTED
+─────────────────────────────────────────────────────────────────────────────
+✓ Setup & Prerequisites
+✓ Authentication & Session
+✓ GitHub Agent Templates (CRITICAL)
+✓ Context % Tracking (with bug documentation)
+✓ State Persistence & File I/O
+✓ Agent-to-Agent Communication (Pillar II)
+✓ Workplans & Task DAGs (Pillar I)
+✓ Schedule & Autonomous Execution
+✓ Queue Management & Rate Limiting
+✓ File Operations & Persistence (Pillar III)
+✓ Error Handling & Recovery
+✓ Multi-Agent Coordination & Dashboard
+✓ Complete System Cleanup
+
+🔍 TROUBLESHOOTING
+─────────────────────────────────────────────────────────────────────────────
+Having issues? Each phase file has a "Troubleshooting" section with:
+  • Common issues
+  • Solutions
+  • Fallback procedures (use API if UI fails)
+
+═══════════════════════════════════════════════════════════════════════════════
+Total Documentation: ~100KB | Duration: 165 minutes | Status: ✅ COMPLETE
+═══════════════════════════════════════════════════════════════════════════════

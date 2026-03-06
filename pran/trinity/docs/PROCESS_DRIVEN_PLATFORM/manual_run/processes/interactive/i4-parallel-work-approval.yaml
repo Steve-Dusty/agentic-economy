@@ -1,0 +1,104 @@
+# I4 - Parallel Work Then Single Approval
+#
+# Purpose: Multiple agents work in parallel, then human reviews combined output
+# Interaction: Review work from multiple sources
+#
+# Flow:
+# 1. Three agents work in parallel (research, analysis, summary)
+# 2. Outputs are combined
+# 3. Human reviews the combined output
+# 4. Approved: Final publish / Rejected: Archive
+
+name: i4-parallel-work-approval
+version: "1.0"
+description: Parallel agent work followed by human review
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: kickoff
+    name: Kickoff
+    type: agent_task
+    agent: process-echo
+    message: Starting parallel research workflow
+    timeout: 120s
+
+  - id: research-team
+    name: Research Team
+    type: agent_task
+    agent: process-worker
+    depends_on: [kickoff]
+    message: Conduct research and return key findings as JSON
+    timeout: 120s
+
+  - id: analysis-team
+    name: Analysis Team
+    type: agent_task
+    agent: process-worker
+    depends_on: [kickoff]
+    message: Perform analysis and return insights as JSON
+    timeout: 120s
+
+  - id: summary-team
+    name: Summary Team
+    type: agent_task
+    agent: process-echo
+    depends_on: [kickoff]
+    message: Prepare executive summary template
+    timeout: 120s
+
+  - id: combine-outputs
+    name: Combine Outputs
+    type: agent_task
+    agent: process-echo
+    depends_on: [research-team, analysis-team, summary-team]
+    message: All three teams have completed their work - combining outputs
+    timeout: 120s
+
+  - id: executive-review
+    name: Executive Review
+    type: human_approval
+    depends_on: [combine-outputs]
+    description: |
+      COMBINED OUTPUT READY FOR REVIEW
+
+      Three teams have completed their parallel work:
+      - Research Team: Complete
+      - Analysis Team: Complete
+      - Summary Team: Complete
+
+      Please review the combined output:
+
+      APPROVE: Publish the final report
+      REJECT: Send back for more work
+    timeout: 30m
+    on_error:
+      action: skip_step
+
+  - id: publish-report
+    name: Publish Report
+    type: agent_task
+    agent: process-worker
+    depends_on: [executive-review]
+    condition: steps.executive-review.output.decision == 'approved'
+    message: Executive approved - publishing final report
+    timeout: 120s
+
+  - id: archive-draft
+    name: Archive Draft
+    type: agent_task
+    agent: process-echo
+    depends_on: [executive-review]
+    condition: steps.executive-review.status == 'skipped'
+    message: Executive rejected - archiving draft for revision
+    timeout: 120s
+
+  - id: complete
+    name: Complete
+    type: agent_task
+    agent: process-echo
+    depends_on: [publish-report, archive-draft]
+    message: Parallel workflow with approval complete
+    timeout: 120s

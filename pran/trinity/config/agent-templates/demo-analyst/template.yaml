@@ -1,0 +1,78 @@
+name: demo-analyst
+display_name: Analysis Agent
+description: Synthesizes research findings and answers strategic questions
+tagline: Strategic insights from research
+version: "1.0.0"
+author: Trinity Demo
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+capabilities:
+  - synthesis
+  - strategic-analysis
+  - report-generation
+
+use_cases:
+  - "/briefing - Generate a daily briefing from recent findings"
+  - "/opportunities - List and rank all identified opportunities"
+  - "/ask What are the top AI trends? - Answer strategic questions"
+  - "/request-research competitor analysis - Request specific research"
+
+shared_folders:
+  expose: false
+  consume: true
+
+commands:
+  - name: briefing
+    description: Generate daily briefing from research findings
+  - name: opportunities
+    description: List and rank all identified opportunities
+  - name: ask
+    description: Answer a strategic question using accumulated research
+  - name: request-research
+    description: Ask the researcher to investigate a specific topic
+
+schedules:
+  - name: daily-briefing
+    cron: "0 9 * * *"
+    message: "/briefing"
+    description: Daily synthesis of research findings
+
+# Custom metrics displayed in Trinity UI
+metrics:
+  - name: briefings_generated
+    type: counter
+    label: "Briefings"
+    description: "Total briefings generated"
+
+  - name: questions_answered
+    type: counter
+    label: "Questions"
+    description: "Strategic questions answered"
+
+  - name: opportunities_tracked
+    type: gauge
+    label: "Opportunities"
+    description: "Current opportunities in analysis pipeline"
+
+  - name: research_requests
+    type: counter
+    label: "Research Requests"
+    description: "Research requests sent to researcher"
+
+  - name: analysis_status
+    type: status
+    label: "Status"
+    description: "Current analysis status"
+    values:
+      - value: "analyzing"
+        color: "green"
+        label: "Analyzing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"
+      - value: "waiting"
+        color: "yellow"
+        label: "Waiting for Data"

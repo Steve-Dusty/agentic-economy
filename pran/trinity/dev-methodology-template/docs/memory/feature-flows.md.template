@@ -1,0 +1,84 @@
+# Feature Flows Index
+
+> Index of all feature flow documentation.
+> Each flow traces a feature from UI to database.
+
+---
+
+## Recent Updates
+
+| Date | Feature | Change |
+|------|---------|--------|
+| YYYY-MM-DD | example-feature | Initial documentation |
+
+---
+
+## Status Legend
+
+| Status | Meaning |
+|--------|---------|
+| ✅ | Documented and tested |
+| 📝 | Documented, not tested |
+| 🚧 | Work in progress |
+| ⏳ | Needs documentation |
+
+---
+
+## Core Features
+
+| Feature | Document | Status | Components |
+|---------|----------|--------|------------|
+| User Login | [user-login.md](feature-flows/user-login.md) | ⏳ | Auth, API, DB |
+| User Registration | [user-registration.md](feature-flows/user-registration.md) | ⏳ | Auth, API, DB, Email |
+| Password Reset | [password-reset.md](feature-flows/password-reset.md) | ⏳ | Auth, API, DB, Email |
+
+---
+
+## Data Management
+
+| Feature | Document | Status | Components |
+|---------|----------|--------|------------|
+| Create Resource | [create-resource.md](feature-flows/create-resource.md) | ⏳ | UI, API, DB |
+| List Resources | [list-resources.md](feature-flows/list-resources.md) | ⏳ | UI, API, DB |
+| Update Resource | [update-resource.md](feature-flows/update-resource.md) | ⏳ | UI, API, DB |
+| Delete Resource | [delete-resource.md](feature-flows/delete-resource.md) | ⏳ | UI, API, DB |
+
+---
+
+## User Features
+
+| Feature | Document | Status | Components |
+|---------|----------|--------|------------|
+| User Profile | [user-profile.md](feature-flows/user-profile.md) | ⏳ | UI, API, DB |
+| User Settings | [user-settings.md](feature-flows/user-settings.md) | ⏳ | UI, API, DB |
+
+---
+
+## Admin Features
+
+| Feature | Document | Status | Components |
+|---------|----------|--------|------------|
+| Admin Dashboard | - | ⏳ | - |
+| User Management | - | ⏳ | - |
+
+---
+
+## Integrations
+
+| Feature | Document | Status | Components |
+|---------|----------|--------|------------|
+| Email Sending | - | ⏳ | - |
+| File Upload | - | ⏳ | - |
+
+---
+
+## How to Add a New Feature Flow
+
+1. Create file: `docs/memory/feature-flows/{feature-name}.md`
+2. Use the template from `/feature-flow-analysis` command
+3. Add entry to this index
+4. Update status as you document
+
+## Feature Flow Template
+
+See `.claude/commands/feature-flow-analysis.md` for the standard template.

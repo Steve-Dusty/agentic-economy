@@ -1,0 +1,34 @@
+name: Test Echo Agent
+display_name: Test Echo
+description: Simple echo agent for testing basic chat functionality
+version: "1.0.0"
+author: Trinity Platform
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+mcp_servers: []
+
+credentials: {}
+
+metrics:
+  - name: messages_echoed
+    type: counter
+    label: "Messages"
+    description: "Total messages echoed"
+
+  - name: total_words
+    type: counter
+    label: "Words"
+    description: "Total words processed"
+
+  - name: total_characters
+    type: counter
+    label: "Characters"
+    description: "Total characters processed"
+
+  - name: avg_message_length
+    type: gauge
+    label: "Avg Length"
+    description: "Average message length in characters"

@@ -1,0 +1,433 @@
+"""
+Agent Service Lifecycle - Agent start/stop and configuration management.
+
+Contains functions for starting, stopping, and reconfiguring agents.
+"""
+import logging
+import docker
+import httpx
+
+from fastapi import HTTPException
+
+from database import db
+from services.docker_service import (
+    docker_client,
+    get_agent_container,
+)
+from services.docker_utils import (
+    container_stop, container_remove, container_start, container_reload,
+    volume_get, volume_create, containers_run
+)
+from services.settings_service import get_anthropic_api_key, get_agent_full_capabilities
+from services.agent_client import get_agent_client
+from services.skill_service import skill_service
+from .helpers import check_shared_folder_mounts_match, check_api_key_env_matches, check_resource_limits_match, check_full_capabilities_match
+from .read_only import inject_read_only_hooks
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Container Security Capability Sets
+# =============================================================================
+# These define the Linux capabilities granted to agent containers.
+# Security principle: Always drop ALL caps, then add back only what's needed.
+
+# Restricted mode capabilities - minimum for agent operation (default)
+RESTRICTED_CAPABILITIES = [
+    'NET_BIND_SERVICE',  # Bind to ports < 1024
+    'SETGID', 'SETUID',  # Change user/group (for su/sudo)
+    'CHOWN',             # Change file ownership
+    'SYS_CHROOT',        # Use chroot
+    'AUDIT_WRITE',       # Write to audit log
+]
+
+# Full capabilities mode - adds package installation support
+# Used when agents need apt-get, pip install, etc.
+FULL_CAPABILITIES = RESTRICTED_CAPABILITIES + [
+    'DAC_OVERRIDE',      # Bypass file permission checks (needed for apt)
+    'FOWNER',            # Bypass permission checks on file owner
+    'FSETID',            # Don't clear setuid/setgid bits
+    'KILL',              # Send signals to processes
+    'MKNOD',             # Create special files
+    'NET_RAW',           # Use raw sockets (ping, etc.)
+    'SYS_PTRACE',        # Trace processes (debugging)
+]
+
+# These capabilities are NEVER granted - they pose significant security risks
+# Listed for documentation; we achieve this by always using cap_drop=['ALL']
+PROHIBITED_CAPABILITIES = [
+    'SYS_ADMIN',         # Mount filesystems, configure namespace - too powerful
+    'NET_ADMIN',         # Network administration - could escape container
+    'SYS_RAWIO',         # Raw I/O access - direct hardware access
+    'SYS_MODULE',        # Load kernel modules - kernel compromise
+    'SYS_BOOT',          # Reboot system
+]
+
+
+async def inject_trinity_meta_prompt(agent_name: str, max_retries: int = 5, retry_delay: float = 2.0) -> dict:
+    """
+    Inject Trinity meta-prompt into an agent via its internal API.
+
+    This is called after agent startup to inject planning commands
+    and create the necessary directory structure.
+
+    Args:
+        agent_name: Name of the agent
+        max_retries: Number of retries for connection
+        retry_delay: Seconds between retries
+
+    Returns:
+        dict with injection status or error info
+    """
+    # Fetch system-wide custom prompt setting
+    custom_prompt = db.get_setting_value("trinity_prompt", default=None)
+    if custom_prompt:
+        logger.info(f"Found trinity_prompt setting ({len(custom_prompt)} chars), will inject into {agent_name}")
+
+    # Use AgentClient for injection (handles retries internally)
+    client = get_agent_client(agent_name)
+    return await client.inject_trinity_prompt(
+        custom_prompt=custom_prompt,
+        force=False,
+        max_retries=max_retries,
+        retry_delay=retry_delay
+    )
+
+
+async def inject_assigned_credentials(agent_name: str, max_retries: int = 3, retry_delay: float = 2.0) -> dict:
+    """
+    Import credentials from encrypted .credentials.enc file on agent startup.
+
+    CRED-002: Credentials are now stored as encrypted files in the agent's
+    workspace (committed to git). On startup, we try to import from
+    .credentials.enc if it exists.
+
+    Args:
+        agent_name: Name of the agent
+        max_retries: Number of retries for connection
+        retry_delay: Seconds between retries
+
+    Returns:
+        dict with injection status
+    """
+    import asyncio
+    from services.credential_encryption import get_credential_encryption_service
+
+    try:
+        encryption_service = get_credential_encryption_service()
+    except ValueError as e:
+        # No encryption key configured - this is optional
+        logger.debug(f"Credential encryption not configured: {e}")
+        return {"status": "skipped", "reason": "encryption_not_configured"}
+
+    # Try to import from .credentials.enc with retries
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            files = await encryption_service.import_to_agent(agent_name)
+            if files:
+                logger.info(f"Imported {len(files)} credential file(s) from .credentials.enc into {agent_name}")
+                return {
+                    "status": "success",
+                    "credential_count": len(files),
+                    "files": list(files.keys())
+                }
+            else:
+                return {"status": "skipped", "reason": "no_credentials_enc_file"}
+
+        except ValueError as e:
+            # .credentials.enc doesn't exist - this is normal for new agents
+            if "not found" in str(e).lower():
+                logger.debug(f"No .credentials.enc found for agent {agent_name}")
+                return {"status": "skipped", "reason": "no_credentials_enc_file"}
+            last_error = str(e)
+
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Credential import attempt {attempt + 1} failed: {last_error}")
+
+        if attempt < max_retries - 1:
+            await asyncio.sleep(retry_delay)
+
+    logger.error(f"Failed to import credentials into agent {agent_name} after {max_retries} attempts: {last_error}")
+    return {"status": "failed", "error": last_error}
+
+
+async def inject_assigned_skills(agent_name: str) -> dict:
+    """
+    Inject assigned skills into a running agent.
+
+    This is called after agent startup to push any skills that were
+    assigned to this agent in the Skills tab.
+
+    Args:
+        agent_name: Name of the agent
+
+    Returns:
+        dict with injection status
+    """
+    from database import db
+
+    # Get assigned skills
+    skill_names = db.get_agent_skill_names(agent_name)
+
+    if not skill_names:
+        logger.debug(f"No assigned skills for agent {agent_name}")
+        return {"status": "skipped", "reason": "no_skills"}
+
+    logger.info(f"Injecting {len(skill_names)} skills into agent {agent_name}: {skill_names}")
+
+    # Inject skills
+    result = await skill_service.inject_skills(agent_name, skill_names)
+
+    if result.get("success"):
+        return {
+            "status": "success",
+            "skills_injected": result.get("skills_injected", 0)
+        }
+    else:
+        return {
+            "status": "partial" if result.get("skills_injected", 0) > 0 else "failed",
+            "skills_injected": result.get("skills_injected", 0),
+            "skills_failed": result.get("skills_failed", 0),
+            "results": result.get("results", {})
+        }
+
+
+async def start_agent_internal(agent_name: str) -> dict:
+    """
+    Internal function to start an agent.
+
+    Used by both the API endpoint and system deployment.
+    Triggers Trinity meta-prompt injection.
+
+    Args:
+        agent_name: Name of the agent to start
+
+    Returns:
+        dict with start status and trinity_injection result
+
+    Raises:
+        HTTPException: If agent not found or start fails
+    """
+    container = get_agent_container(agent_name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check if container needs recreation for shared folders, API key, resource limits, or capabilities
+    await container_reload(container)
+    shared_folder_match = await check_shared_folder_mounts_match(container, agent_name)
+    needs_recreation = (
+        not shared_folder_match or
+        not check_api_key_env_matches(container, agent_name) or
+        not check_resource_limits_match(container, agent_name) or
+        not check_full_capabilities_match(container, agent_name)
+    )
+
+    if needs_recreation:
+        # Recreate container with updated config
+        # Use system user for internal operations
+        await recreate_container_with_updated_config(agent_name, container, "system")
+        container = get_agent_container(agent_name)
+
+    await container_start(container)
+
+    # Inject Trinity meta-prompt
+    trinity_result = await inject_trinity_meta_prompt(agent_name)
+    trinity_status = trinity_result.get("status", "unknown")
+
+    # Inject assigned credentials from the Credentials page
+    credentials_result = await inject_assigned_credentials(agent_name)
+    credentials_status = credentials_result.get("status", "unknown")
+
+    # Inject assigned skills from the Skills page
+    skills_result = await inject_assigned_skills(agent_name)
+    skills_status = skills_result.get("status", "unknown")
+
+    # Inject read-only hooks if enabled
+    read_only_result = {"status": "skipped", "reason": "not_enabled"}
+    read_only_data = db.get_read_only_mode(agent_name)
+    if read_only_data.get("enabled"):
+        try:
+            read_only_result = await inject_read_only_hooks(agent_name, read_only_data.get("config"))
+            if read_only_result.get("success"):
+                read_only_result["status"] = "success"
+            else:
+                read_only_result["status"] = "failed"
+        except Exception as e:
+            logger.warning(f"Failed to inject read-only hooks into agent {agent_name}: {e}")
+            read_only_result = {"status": "failed", "error": str(e)}
+
+    return {
+        "message": f"Agent {agent_name} started",
+        "trinity_injection": trinity_status,
+        "trinity_result": trinity_result,
+        "credentials_injection": credentials_status,
+        "credentials_result": credentials_result,
+        "skills_injection": skills_status,
+        "skills_result": skills_result,
+        "read_only_injection": read_only_result.get("status", "unknown"),
+        "read_only_result": read_only_result
+    }
+
+
+async def recreate_container_with_updated_config(agent_name: str, old_container, owner_username: str):
+    """
+    Recreate an agent container with updated configuration.
+    Handles shared folder mounts and API key settings.
+    Preserves the agent's workspace volume and other configuration.
+    """
+    # Extract configuration from old container
+    old_config = old_container.attrs.get("Config", {})
+    old_host_config = old_container.attrs.get("HostConfig", {})
+
+    # Get key settings
+    image = old_config.get("Image", "trinity-agent:latest")
+    env_vars = {e.split("=", 1)[0]: e.split("=", 1)[1] for e in old_config.get("Env", []) if "=" in e}
+    labels = old_config.get("Labels", {})
+
+    # Update auth env vars based on current setting (SUB-002).
+    # Claude Code prioritizes ANTHROPIC_API_KEY over CLAUDE_CODE_OAUTH_TOKEN,
+    # so when a subscription is assigned we must remove the API key and set
+    # the token env var instead.
+    subscription_id = db.get_agent_subscription_id(agent_name)
+    has_subscription = subscription_id is not None
+    use_platform_key = db.get_use_platform_api_key(agent_name)
+
+    if has_subscription:
+        # Subscription assigned — inject token, remove API key
+        token = db.get_subscription_token(subscription_id)
+        if token:
+            env_vars['CLAUDE_CODE_OAUTH_TOKEN'] = token
+        env_vars.pop('ANTHROPIC_API_KEY', None)
+    elif use_platform_key:
+        # No subscription, use platform API key
+        env_vars['ANTHROPIC_API_KEY'] = get_anthropic_api_key()
+        env_vars.pop('CLAUDE_CODE_OAUTH_TOKEN', None)
+    else:
+        # No subscription, no platform key — user will auth in terminal
+        env_vars.pop('ANTHROPIC_API_KEY', None)
+        env_vars.pop('CLAUDE_CODE_OAUTH_TOKEN', None)
+
+    # Get port from labels
+    ssh_port = int(labels.get("trinity.ssh-port", 2222))
+
+    # Get resource limits - check DB for overrides, fallback to labels/defaults
+    db_limits = db.get_resource_limits(agent_name)
+    if db_limits:
+        cpu = db_limits.get("cpu") or labels.get("trinity.cpu", "2")
+        memory = db_limits.get("memory") or labels.get("trinity.memory", "4g")
+    else:
+        cpu = labels.get("trinity.cpu", "2")
+        memory = labels.get("trinity.memory", "4g")
+
+    # Update labels with new resource limits for future reference
+    labels["trinity.cpu"] = cpu
+    labels["trinity.memory"] = memory
+
+    # Get full_capabilities from system-wide setting (not per-agent)
+    full_capabilities = get_agent_full_capabilities()
+
+    # Update label to reflect current setting
+    labels["trinity.full-capabilities"] = str(full_capabilities).lower()
+
+    # Stop and remove old container
+    try:
+        await container_stop(old_container)
+    except Exception:
+        pass
+    await container_remove(old_container)
+
+    # Build new volume configuration
+    agent_volume_name = f"agent-{agent_name}-workspace"
+
+    # Start with base volumes - get existing bind mounts
+    old_mounts = old_container.attrs.get("Mounts", [])
+    volumes = {}
+
+    for m in old_mounts:
+        dest = m.get("Destination", "")
+        # Skip shared folder mounts - we'll add the correct ones
+        if dest == "/home/developer/shared-out" or dest.startswith("/home/developer/shared-in/"):
+            continue
+        # Keep other mounts
+        if m.get("Type") == "bind":
+            volumes[m.get("Source")] = {"bind": dest, "mode": "rw" if m.get("RW", True) else "ro"}
+        elif m.get("Type") == "volume":
+            vol_name = m.get("Name")
+            if vol_name:
+                volumes[vol_name] = {"bind": dest, "mode": "rw" if m.get("RW", True) else "ro"}
+
+    # Add shared folder mounts based on current config
+    shared_config = db.get_shared_folder_config(agent_name)
+    if shared_config:
+        if shared_config.expose_enabled:
+            shared_volume_name = db.get_shared_volume_name(agent_name)
+            volume_created = False
+            try:
+                await volume_get(shared_volume_name)
+            except docker.errors.NotFound:
+                await volume_create(
+                    name=shared_volume_name,
+                    labels={
+                        'trinity.platform': 'agent-shared',
+                        'trinity.agent-name': agent_name
+                    }
+                )
+                volume_created = True
+
+            # Fix ownership of new volumes (Docker creates them as root)
+            if volume_created:
+                try:
+                    await containers_run(
+                        'alpine',
+                        command='chown 1000:1000 /shared',
+                        volumes={shared_volume_name: {'bind': '/shared', 'mode': 'rw'}},
+                        remove=True
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not fix shared volume ownership: {e}")
+
+            volumes[shared_volume_name] = {'bind': '/home/developer/shared-out', 'mode': 'rw'}
+
+        if shared_config.consume_enabled:
+            available_folders = db.get_available_shared_folders(agent_name)
+            for source_agent in available_folders:
+                source_volume = db.get_shared_volume_name(source_agent)
+                mount_path = db.get_shared_mount_path(source_agent)
+                try:
+                    await volume_get(source_volume)
+                    volumes[source_volume] = {'bind': mount_path, 'mode': 'rw'}
+                except docker.errors.NotFound:
+                    pass
+
+    # Create new container with security settings
+    # Security principle: ALWAYS apply baseline security, even in full_capabilities mode
+    # - Always drop ALL caps, then add back only what's needed
+    # - Always apply AppArmor profile
+    # - Always apply noexec,nosuid to /tmp
+    new_container = await containers_run(
+        image,
+        detach=True,
+        name=f"agent-{agent_name}",
+        ports={'22/tcp': ssh_port},
+        volumes=volumes,
+        environment=env_vars,
+        labels=labels,
+        # Always apply AppArmor for additional sandboxing
+        security_opt=['apparmor:docker-default'],
+        # Always drop ALL capabilities first (defense in depth)
+        cap_drop=['ALL'],
+        # Add back only the capabilities needed for the mode
+        cap_add=FULL_CAPABILITIES if full_capabilities else RESTRICTED_CAPABILITIES,
+        read_only=False,
+        # Always apply noexec,nosuid to /tmp for security
+        tmpfs={'/tmp': 'noexec,nosuid,size=100m'},
+        network='trinity-agent-network',
+        mem_limit=memory,
+        cpu_count=int(cpu)
+    )
+
+    logger.info(f"Recreated container for agent {agent_name} with updated configuration")
+    return new_container

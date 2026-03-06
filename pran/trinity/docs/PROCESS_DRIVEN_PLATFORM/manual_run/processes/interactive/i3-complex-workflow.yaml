@@ -1,0 +1,95 @@
+# I3 - Complex Mixed Workflow
+#
+# Purpose: Real-world scenario with agents, gateways, and approvals
+# Interaction: One approval decision mid-workflow
+#
+# Flow:
+# 1. Analyze data (agent)
+# 2. Gateway routes based on analysis score
+# 3. High scores go to approval
+# 4. Low scores go straight to archive
+# 5. Approved high-scores get published
+
+name: i3-complex-workflow
+version: "1.0"
+description: Mixed workflow with agents, gateways, and approval
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: analyze-data
+    name: Analyze Data
+    type: agent_task
+    agent: process-worker
+    message: |
+      Analyze this data and return JSON with a quality_score between 0-100.
+      Make the score random - sometimes high (80+), sometimes low (below 50).
+      Format: {"quality_score": <number>, "summary": "<brief analysis>"}
+    timeout: 120s
+
+  - id: score-router
+    name: Score Router
+    type: gateway
+    depends_on: [analyze-data]
+    gateway_type: exclusive
+    routes:
+      - target: quality-review
+        condition: steps.analyze-data.output.quality_score >= 70
+      - target: auto-archive
+        condition: steps.analyze-data.output.quality_score < 70
+    default_route: auto-archive
+
+  - id: quality-review
+    name: Quality Review (High Score)
+    type: human_approval
+    depends_on: [score-router]
+    condition: steps.analyze-data.output.quality_score >= 70
+    description: |
+      HIGH QUALITY CONTENT DETECTED
+
+      Score: Check analyze-data output for quality_score
+
+      This content scored high and needs human review before publishing.
+
+      APPROVE: Publish this high-quality content
+      REJECT: Decline despite high score
+    timeout: 30m
+    on_error:
+      action: skip_step
+
+  - id: auto-archive
+    name: Auto Archive (Low Score)
+    type: agent_task
+    agent: process-echo
+    depends_on: [score-router]
+    condition: steps.analyze-data.output.quality_score < 70
+    message: Low quality score - automatically archiving content
+    timeout: 120s
+
+  - id: publish-high-quality
+    name: Publish High Quality
+    type: agent_task
+    agent: process-worker
+    depends_on: [quality-review]
+    condition: steps.quality-review.output.decision == 'approved'
+    message: Publishing approved high-quality content to production
+    timeout: 120s
+
+  - id: decline-high-quality
+    name: Decline High Quality
+    type: agent_task
+    agent: process-echo
+    depends_on: [quality-review]
+    condition: steps.quality-review.status == 'skipped'
+    message: High-quality content declined by reviewer
+    timeout: 120s
+
+  - id: final-report
+    name: Final Report
+    type: agent_task
+    agent: process-echo
+    depends_on: [auto-archive, publish-high-quality, decline-high-quality]
+    message: Workflow complete - generating final status report
+    timeout: 120s

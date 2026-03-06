@@ -1,0 +1,49 @@
+name: dd-lead
+display_name: DD Deal Lead Agent
+description: Synthesize all due diligence findings, calculate risk score, and make investment recommendation
+tagline: The verdict
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "4"
+  memory: "8g"
+
+capabilities:
+  - synthesis
+  - risk-scoring
+  - investment-recommendation
+  - executive-briefing
+
+use_cases:
+  - "Synthesize specialist reports"
+  - "Calculate overall risk score"
+  - "Make investment recommendation"
+  - "Prepare Investment Committee briefing"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: deals_evaluated
+    type: counter
+    label: "Deals Evaluated"
+    description: "Total deals assessed"
+
+  - name: recommendations_made
+    type: counter
+    label: "Recommendations"
+    description: "Investment recommendations made"
+
+  - name: analysis_status
+    type: status
+    label: "Status"
+    description: "Current analysis status"
+    values:
+      - value: "synthesizing"
+        color: "blue"
+        label: "Synthesizing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

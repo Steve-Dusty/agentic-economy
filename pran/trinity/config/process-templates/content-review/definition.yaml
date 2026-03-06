@@ -1,0 +1,71 @@
+name: "{{name}}"
+version: "1.0"
+description: "Content review workflow with AI analysis and human approval"
+
+triggers:
+  - type: manual
+    id: manual-start
+
+steps:
+  - id: analyze-content
+    name: Analyze Content
+    type: agent_task
+    agent: content-analyzer
+    message: |
+      Please analyze the following content for:
+      - Grammar and spelling issues
+      - Tone and style consistency
+      - Factual accuracy concerns
+      - Policy compliance
+
+      Content: {{input.content}}
+    output_key: analysis
+
+  - id: check-quality
+    name: Check Quality Score
+    type: gateway
+    depends_on:
+      - analyze-content
+    gateway_type: exclusive
+    routes:
+      - condition: "{{steps.analyze-content.output.quality_score}} >= 80"
+        target: auto-approve
+    default_route: manual-review
+
+  - id: manual-review
+    name: Manual Review Required
+    type: human_approval
+    depends_on:
+      - check-quality
+    title: "Content Review Required"
+    description: |
+      The content did not meet auto-approval threshold.
+
+      Analysis Results:
+      {{steps.analyze-content.output.analysis}}
+
+      Quality Score: {{steps.analyze-content.output.quality_score}}
+
+      Please review and decide whether to approve or reject.
+    assignees:
+      - content-reviewer
+    timeout: 24h
+
+  - id: auto-approve
+    name: Auto Approve
+    type: agent_task
+    depends_on:
+      - check-quality
+    agent: content-publisher
+    message: |
+      Content has passed quality checks. Please prepare for publication.
+
+      Content: {{input.content}}
+      Analysis: {{steps.analyze-content.output}}
+    output_key: publication_ready
+
+outputs:
+  - name: approval_status
+    source: "{{steps.manual-review.output.decision || 'auto-approved'}}"
+  - name: analysis_summary
+    source: "{{steps.analyze-content.output.analysis}}"

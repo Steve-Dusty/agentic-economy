@@ -1,0 +1,13 @@
+name: Test Counter Agent
+display_name: Test Counter
+description: Counter agent for testing state persistence across messages
+version: "1.0.0"
+author: Trinity Platform
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+mcp_servers: []
+
+credentials: {}

@@ -1,0 +1,21 @@
+name: data-analysis
+display_name: Data Analysis Report
+description: Generate insights and reports from data using AI analysis
+category: analytics
+complexity: simple
+version: "1.0"
+author: Trinity Examples
+
+tags:
+  - analytics
+  - reporting
+  - data
+  - insights
+
+step_types_used:
+  - agent_task
+
+use_cases:
+  - "Automated data analysis and reporting"
+  - "Periodic business intelligence reports"
+  - "Data-driven decision support"

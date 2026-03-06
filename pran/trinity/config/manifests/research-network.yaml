@@ -1,0 +1,59 @@
+# Research Network - Autonomous Demo System
+# Deploy with: POST /api/systems/deploy
+#
+# This manifest deploys a two-agent research network:
+# - Researcher: Gathers trends on schedule (every 4 hours)
+# - Analyst: Synthesizes findings, answers questions (daily briefing)
+#
+# Usage:
+#   curl -X POST http://localhost:8000/api/systems/deploy \
+#     -H "Authorization: Bearer YOUR_TOKEN" \
+#     -H "Content-Type: application/x-yaml" \
+#     --data-binary @config/manifests/research-network.yaml
+
+name: research-network
+description: Two-agent autonomous research and analysis system
+
+# System-wide instructions (injected into all agents)
+prompt: |
+  You are part of the Research Network - an autonomous system for discovering
+  and analyzing opportunities. Work collaboratively with other agents.
+
+  Key principles:
+  - Be thorough but concise in reports
+  - Always cite sources
+  - Flag high-priority findings clearly
+  - Maintain consistent formatting
+
+agents:
+  researcher:
+    template: local:demo-researcher
+    resources:
+      cpu: "1"
+      memory: "2g"
+    folders:
+      expose: true    # Shares /shared-out with analyst
+      consume: false
+    schedules:
+      - name: research-cycle
+        cron: "0 */4 * * *"  # Every 4 hours
+        message: "/research"
+        timezone: UTC
+
+  analyst:
+    template: local:demo-analyst
+    resources:
+      cpu: "1"
+      memory: "2g"
+    folders:
+      expose: false
+      consume: true   # Mounts researcher's shared folder
+    schedules:
+      - name: daily-briefing
+        cron: "0 9 * * *"  # Daily at 9 AM UTC
+        message: "/briefing"
+        timezone: UTC
+
+# Permission configuration
+permissions:
+  preset: full-mesh  # Both agents can call each other

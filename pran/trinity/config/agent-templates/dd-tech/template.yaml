@@ -1,0 +1,44 @@
+name: dd-tech
+display_name: DD Tech Agent
+description: Technology assessment, scalability evaluation, and IP analysis
+tagline: Under the hood
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "2"
+  memory: "4g"
+
+capabilities:
+  - technical-assessment
+  - architecture-review
+  - ip-analysis
+  - security-evaluation
+
+use_cases:
+  - "Assess problem-solution fit"
+  - "Evaluate tech stack maturity"
+  - "Analyze scalability potential"
+  - "Review IP and patent position"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: tech_reviews
+    type: counter
+    label: "Tech Reviews"
+    description: "Total technical assessments"
+
+  - name: research_status
+    type: status
+    label: "Status"
+    description: "Current research status"
+    values:
+      - value: "researching"
+        color: "blue"
+        label: "Researching"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

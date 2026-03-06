@@ -1,0 +1,174 @@
+"""
+Nevermined admin configuration router (NVM-001).
+
+Authenticated endpoints for managing per-agent Nevermined payment configuration.
+All endpoints require authentication + agent owner/admin access.
+"""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Path
+from typing import List
+
+from models import User
+from database import db
+from dependencies import get_current_user
+from db_models import NeverminedConfigCreate, NeverminedConfig, NeverminedPaymentLog
+from services.nevermined_payment_service import (
+    get_nevermined_payment_service,
+    NEVERMINED_AVAILABLE,
+)
+
+router = APIRouter(prefix="/api/nevermined", tags=["nevermined"])
+logger = logging.getLogger(__name__)
+
+
+def _require_agent_access(agent_name: str, current_user: User):
+    """Verify the user is owner or admin for the agent."""
+    if current_user.role == "admin":
+        return
+    if not db.can_user_share_agent(current_user.username, agent_name):
+        raise HTTPException(status_code=403, detail="Owner access required")
+
+
+def _check_sdk():
+    """Return 501 if payments-py is not installed."""
+    if not NEVERMINED_AVAILABLE:
+        raise HTTPException(
+            status_code=501,
+            detail="Nevermined payment integration is not available (payments-py not installed)",
+        )
+
+
+@router.post("/agents/{name}/config", response_model=NeverminedConfig)
+async def configure_nevermined(
+    name: str,
+    request: NeverminedConfigCreate,
+    current_user: User = Depends(get_current_user),
+):
+    """Configure Nevermined payment settings for an agent."""
+    _check_sdk()
+    _require_agent_access(name, current_user)
+
+    try:
+        config = db.create_or_update_nevermined_config(
+            agent_name=name,
+            nvm_api_key=request.nvm_api_key,
+            nvm_environment=request.nvm_environment,
+            nvm_agent_id=request.nvm_agent_id,
+            nvm_plan_id=request.nvm_plan_id,
+            credits_per_request=request.credits_per_request,
+        )
+        logger.info(f"Nevermined config updated for agent '{name}' by {current_user.username}")
+        return config
+    except Exception as e:
+        logger.error(f"Failed to configure Nevermined for agent '{name}': {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/agents/{name}/config", response_model=NeverminedConfig)
+async def get_nevermined_config(
+    name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Get Nevermined config for an agent (no decrypted key)."""
+    _require_agent_access(name, current_user)
+
+    config = db.get_nevermined_config(name)
+    if not config:
+        raise HTTPException(status_code=404, detail="Nevermined not configured for this agent")
+    return config
+
+
+@router.delete("/agents/{name}/config")
+async def delete_nevermined_config(
+    name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Remove Nevermined config from an agent."""
+    _require_agent_access(name, current_user)
+
+    deleted = db.delete_nevermined_config(name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Nevermined not configured for this agent")
+
+    logger.info(f"Nevermined config deleted for agent '{name}' by {current_user.username}")
+    return {"detail": "Nevermined configuration removed"}
+
+
+@router.put("/agents/{name}/config/toggle")
+async def toggle_nevermined(
+    name: str,
+    enabled: bool,
+    current_user: User = Depends(get_current_user),
+):
+    """Enable or disable Nevermined payments for an agent."""
+    _check_sdk()
+    _require_agent_access(name, current_user)
+
+    updated = db.set_nevermined_enabled(name, enabled)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Nevermined not configured for this agent")
+
+    state = "enabled" if enabled else "disabled"
+    logger.info(f"Nevermined {state} for agent '{name}' by {current_user.username}")
+    return {"detail": f"Nevermined payments {state}", "enabled": enabled}
+
+
+@router.get("/agents/{name}/payments", response_model=List[NeverminedPaymentLog])
+async def get_payment_history(
+    name: str,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """Get payment history for an agent."""
+    _require_agent_access(name, current_user)
+    return db.get_nevermined_payment_log(name, limit)
+
+
+@router.get("/settlement-failures", response_model=List[NeverminedPaymentLog])
+async def get_settlement_failures(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """List unsettled payments across all agents (admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return db.get_nevermined_settlement_failures(limit)
+
+
+@router.post("/retry-settlement/{log_id}")
+async def retry_settlement(
+    log_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Retry a failed settlement (admin only).
+
+    Looks up the original payment log entry, retrieves agent credentials,
+    and attempts settlement again.
+    """
+    _check_sdk()
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    log_entry = db.get_nevermined_payment_log_entry(log_id)
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Payment log entry not found")
+
+    if log_entry.action != "settle_failed":
+        raise HTTPException(status_code=400, detail="Only failed settlements can be retried")
+
+    # Get agent config with decrypted key
+    config_data = db.get_nevermined_config_with_key(log_entry.agent_name)
+    if not config_data:
+        raise HTTPException(status_code=404, detail="Agent Nevermined config not found")
+
+    logger.info(f"Retrying settlement {log_id} for agent '{log_entry.agent_name}' by {current_user.username}")
+
+    return {
+        "detail": "Settlement retry queued",
+        "log_id": log_id,
+        "agent_name": log_entry.agent_name,
+        "note": "Manual settlement retry requires the original access token, which is not stored. "
+                "Use the Nevermined dashboard to reconcile unsettled transactions.",
+    }

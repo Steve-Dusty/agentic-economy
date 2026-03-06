@@ -1,0 +1,13 @@
+# Test dependencies for Trinity API tests
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-timeout>=2.3.0
+pytest-html>=4.1.0
+pytest-cov>=6.0.0
+httpx>=0.28.0
+python-dotenv>=1.0.1
+docker>=7.1.0
+apscheduler>=3.11.0
+pydantic>=2.10.0
+fastapi>=0.115.0
+pyyaml>=6.0.0

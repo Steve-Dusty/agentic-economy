@@ -1,0 +1,50 @@
+# T1.1 - Single Agent Step
+# 
+# Purpose: Validate basic process execution with one agent_task step
+# Agent: process-echo
+# Expected: Process completes successfully, output captured
+#
+# Test Validates:
+# - Process engine starts execution
+# - Agent is invoked via MCP
+# - Output is captured and stored
+# - Execution status transitions: PENDING -> RUNNING -> COMPLETED
+
+name: t1.1-single-step
+version: "1.0"
+description: "Single agent step test - validates basic execution flow"
+
+triggers:
+  - type: webhook
+    id: manual-start
+
+steps:
+  - id: echo-step
+    name: Echo Test
+    type: agent_task
+    agent: process-echo
+    message: "Hello from process engine test T1.1"
+    timeout: 30s
+
+# Expected Output:
+# steps.echo-step.output should contain:
+# {
+#   "status": "success",
+#   "input_received": "Hello from process engine test T1.1",
+#   "word_count": 7,
+#   "data": {
+#     "processed": true,
+#     "echo": "Hello from process engine test T1.1"
+#   }
+# }
+
+# Verification Checklist:
+# [ ] Process created successfully
+# [ ] Process published successfully
+# [ ] Execution started (status: RUNNING)
+# [ ] Step echo-step started
+# [ ] Agent process-echo received message
+# [ ] Agent responded with structured JSON
+# [ ] Step echo-step completed
+# [ ] Execution completed (status: COMPLETED)
+# [ ] Output retrievable via API

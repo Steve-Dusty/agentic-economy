@@ -1,0 +1,53 @@
+# T5.4 - Concurrent Executions
+# 
+# Purpose: Test execution concurrency limits
+# Agent: process-echo
+# Expected: Multiple executions run, limits observed
+
+name: t5.4-concurrent-executions
+version: "1.0"
+description: "Concurrent executions test - validates multiple instances"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: start
+    name: Start
+    type: agent_task
+    agent: process-echo
+    message: "Concurrent test started"
+    timeout: 120s
+
+  - id: slow-work
+    name: Slow Work
+    type: agent_task
+    agent: process-worker
+    depends_on: [start]
+    message: |
+      Please perform a detailed analysis:
+      1. Write a comprehensive summary
+      2. Review and revise
+      This is designed to take 30+ seconds.
+    timeout: 180s
+
+  - id: finish
+    name: Finish
+    type: agent_task
+    agent: process-echo
+    depends_on: [slow-work]
+    message: "Concurrent test completed"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution #1
+# 2. Immediately start execution #2  
+# 3. Immediately start execution #3
+# 4. All 3 should run concurrently
+
+# Verification Checklist:
+# [ ] Execution #1 starts
+# [ ] Execution #2 starts (concurrent)
+# [ ] Execution #3 starts (concurrent)
+# [ ] All complete eventually

@@ -1,0 +1,44 @@
+name: dd-competitor
+display_name: DD Competitor Agent
+description: Competitive landscape mapping, market share analysis, and threat assessment
+tagline: Know thy enemy
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "2"
+  memory: "4g"
+
+capabilities:
+  - competitive-intelligence
+  - market-mapping
+  - funding-analysis
+  - threat-assessment
+
+use_cases:
+  - "Map direct and indirect competitors"
+  - "Compare funding and traction levels"
+  - "Identify competitive moats"
+  - "Assess big tech threat"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: competitors_analyzed
+    type: counter
+    label: "Competitors Analyzed"
+    description: "Total competitors researched"
+
+  - name: research_status
+    type: status
+    label: "Status"
+    description: "Current research status"
+    values:
+      - value: "researching"
+        color: "blue"
+        label: "Researching"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

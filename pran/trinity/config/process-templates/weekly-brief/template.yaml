@@ -1,0 +1,23 @@
+name: weekly-brief
+display_name: Weekly Intelligence Brief
+description: Automated weekly intelligence briefing compiled from ongoing research
+category: consulting
+complexity: simple
+version: "1.0.0"
+author: Acme Consulting
+
+tags:
+  - consulting
+  - intelligence
+  - automation
+  - weekly
+
+step_types_used:
+  - agent_task
+  - timer
+  - notification
+
+use_cases:
+  - "Weekly executive briefings"
+  - "Automated intelligence compilation"
+  - "Scheduled reporting"

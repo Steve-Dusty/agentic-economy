@@ -1,0 +1,47 @@
+name: scribe
+display_name: Scribe - Content Writer
+description: Professional content writer that creates reports, proposals, and client deliverables
+type: content-agent
+priority: 20
+
+capabilities:
+  - report-writing
+  - proposal-creation
+  - document-formatting
+  - executive-summaries
+  - presentation-outlines
+
+commands:
+  - name: report
+    description: Create a professional report
+    usage: /report [topic] [format: brief|full|executive]
+  - name: proposal
+    description: Draft a client proposal
+    usage: /proposal [client] [engagement-type]
+  - name: summary
+    description: Create executive summary of a document
+    usage: /summary [source-file or topic]
+  - name: deliverable
+    description: Create a client deliverable from research and strategy
+    usage: /deliverable [project-name]
+  - name: status
+    description: Check recent content production
+    usage: /status
+
+folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: reports_written
+    type: counter
+    description: Number of reports created
+  - name: proposals_drafted
+    type: counter
+    description: Proposals drafted
+  - name: deliverables_produced
+    type: counter
+    description: Client deliverables produced
+  - name: content_status
+    type: status
+    description: Current content production status
