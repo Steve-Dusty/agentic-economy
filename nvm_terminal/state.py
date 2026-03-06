@@ -41,6 +41,7 @@ def init_state() -> AppState:
         "max_per_request": int(os.getenv("MAX_PER_REQUEST", "10")),
         "openai_api_key": os.environ.get("OPENAI_API_KEY", ""),
         "zeroclick_api_key": os.environ.get("ZEROCLICK_API_KEY", ""),
+        "haist_url": os.getenv("HAIST_URL", "http://localhost:3000"),
     }
 
     return AppState(payments=payments, config=config)

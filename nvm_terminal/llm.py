@@ -9,8 +9,13 @@ from .ui import console
 SYSTEM_PROMPT = """You are an AI economic advisor for the Nevermined agent marketplace.
 You help users discover, evaluate, and purchase services from other AI agents.
 
-You have access to the following tools to interact with the marketplace.
-When the user asks about agents, buying, or the marketplace, use the appropriate tool.
+IMPORTANT TOOL PRIORITY:
+- When the user asks about agents, services, the marketplace, or buying from agents — ALWAYS use discover_agents or buy_service first. These are your PRIMARY tools.
+- show_offers is ONLY for displaying sponsored product ads from ZeroClick. It does NOT search the Nevermined marketplace.
+- If a user says "find agents that can help me research shoes" — use discover_agents, NOT show_offers. The user wants marketplace agents.
+- Only call show_offers when the user is clearly shopping for a consumer product (e.g. "I want to buy shoes") and NOT asking about agents or services.
+- You can call BOTH discover_agents AND show_offers together when both are relevant — but never show_offers alone when the user is asking about the marketplace.
+
 Be concise and actionable in your responses.
 
 Current context will be provided with each message including balances, budget, known agents, etc."""
@@ -80,7 +85,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "show_offers",
-            "description": "Fetch and display sponsored product offers relevant to the user's interests. Use when the user mentions products, shopping, or shows purchase intent.",
+            "description": "Display sponsored product ads from ZeroClick (external ad network, NOT the Nevermined marketplace). ONLY use when the user is clearly shopping for a consumer product. NEVER use this instead of discover_agents when the user asks about marketplace agents or services.",
             "parameters": {
                 "type": "object",
                 "properties": {

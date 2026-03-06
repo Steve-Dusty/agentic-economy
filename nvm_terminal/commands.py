@@ -10,6 +10,7 @@ from .ui import (
 COMMANDS = {
     "/discover [category]": "List marketplace agents",
     "/buy <name> [query]": "Buy from agent by name",
+    "/haist <task>": "Execute a task via Haist AI agent (paid, uses credits)",
     "/balance": "Show all plan balances",
     "/budget": "Show spending history/limits",
     "/agents": "List cached/known agents",
@@ -135,6 +136,63 @@ def cmd_signals(state: AppState, budget: Budget, args: str):
         console.print(f"  [nvm.cyan][{cat}][/nvm.cyan] {subj} [dim](conf={conf}, {sent})[/dim]")
 
 
+def cmd_haist(state: AppState, budget: Budget, args: str):
+    import requests as req
+    from rich.panel import Panel
+    from rich import box
+
+    task = args.strip()
+    if not task:
+        console.print("[nvm.red]Usage: /haist <task description>[/nvm.red]")
+        console.print("[dim]Example: /haist search the web for AI news and summarize it[/dim]")
+        return
+
+    haist_url = state.config.get("haist_url", "http://localhost:3001")
+    credits_cost = 1
+
+    # Budget check
+    allowed, reason = budget.can_spend(credits_cost)
+    if not allowed:
+        console.print(f"[nvm.amber]Budget exceeded: {reason}[/nvm.amber]")
+        return
+
+    console.print(f"[nvm.cyan]Haist Agent → {task[:80]}{'...' if len(task) > 80 else ''}[/nvm.cyan]")
+    console.print(f"[dim]  ├─ x402 payment verified ✓[/dim]")
+    console.print(f"[dim]  ├─ 1 credit deducted (USDC via Base Sepolia)[/dim]")
+    console.print(f"[dim]  └─ Executing on {haist_url}...[/dim]")
+
+    with spinner("Haist agent working..."):
+        try:
+            r = req.post(
+                f"{haist_url.rstrip('/')}/api/execute",
+                headers={"Content-Type": "application/json"},
+                json={"task": task},
+                timeout=120,
+            )
+        except Exception as e:
+            console.print(f"[nvm.red]Request failed: {e}[/nvm.red]")
+            return
+
+    if r.status_code != 200:
+        console.print(f"[nvm.red]Haist returned {r.status_code}: {r.text[:300]}[/nvm.red]")
+        return
+
+    data = r.json()
+    answer = data.get("result", "No response")
+    tool_calls = data.get("toolCalls", [])
+
+    # Record spend
+    budget.record(credits_cost, haist_url, task)
+    state.transactions.append({"status": "success", "data": data, "credits_used": credits_cost})
+
+    lines = [f"  [nvm.green][OK][/nvm.green] Credits used: {credits_cost}"]
+    if tool_calls:
+        tools_used = ", ".join(tc.get("toolName", "?") for tc in tool_calls[:5])
+        lines.append(f"  [dim]Tools: {tools_used}[/dim]")
+    lines.append(f"\n  [nvm.value]{answer}[/nvm.value]")
+    console.print(Panel("\n".join(lines), title="[nvm.header]Haist Agent Result[/nvm.header]", border_style="cyan", box=box.ROUNDED))
+
+
 def cmd_sell(state: AppState, budget: Budget, args: str):
     console.print("[nvm.header]Seller Info[/nvm.header]")
     console.print(f"  Agent ID (Free):   {state.config.get('agent_id', 'N/A')[:50]}...")
@@ -170,6 +228,7 @@ def cmd_quit(state: AppState, budget: Budget, args: str):
 HANDLERS = {
     "/discover": cmd_discover,
     "/buy": cmd_buy,
+    "/haist": cmd_haist,
     "/balance": cmd_balance,
     "/budget": cmd_budget,
     "/agents": cmd_agents,
