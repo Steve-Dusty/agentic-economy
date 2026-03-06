@@ -20,7 +20,8 @@ export default function GraphContainer() {
 
   useEffect(() => {
     function updateSize() {
-      setDimensions({ width: window.innerWidth, height: window.innerHeight });
+      // Account for tab bar height (~56px)
+      setDimensions({ width: window.innerWidth, height: window.innerHeight - 56 });
     }
     updateSize();
     window.addEventListener('resize', updateSize);
