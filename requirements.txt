@@ -1,0 +1,5 @@
+payments-py[fastapi]
+fastapi
+uvicorn
+python-dotenv
+openai

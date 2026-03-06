@@ -1,0 +1,15 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "pnpm"]
+
+[phases.install]
+cmds = ["cd workflow-editor && corepack enable && pnpm install --frozen-lockfile"]
+
+[phases.build]
+cmds = [
+  "cd workflow-editor && pnpm build",
+  "cp -r workflow-editor/apps/web/public workflow-editor/apps/web/.next/standalone/apps/web/public",
+  "cp -r workflow-editor/apps/web/.next/static workflow-editor/apps/web/.next/standalone/apps/web/.next/static"
+]
+
+[start]
+cmd = "cd workflow-editor/apps/web/.next/standalone && HOSTNAME=0.0.0.0 node apps/web/server.js"

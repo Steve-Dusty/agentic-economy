@@ -1,0 +1,26 @@
+{
+  "name": "workflow-editor",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "prettier": "^3.2.5",
+    "turbo": "^2.3.3",
+    "typescript": "^5.8.3"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

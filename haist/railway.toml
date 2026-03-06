@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd workflow-editor && corepack enable && pnpm install --frozen-lockfile && pnpm build && cp -r apps/web/public apps/web/.next/standalone/apps/web/public && cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static"
+
+[deploy]
+startCommand = "cd workflow-editor/apps/web/.next/standalone && HOSTNAME=0.0.0.0 node apps/web/server.js"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
