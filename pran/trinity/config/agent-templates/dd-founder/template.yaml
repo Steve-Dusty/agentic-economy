@@ -1,0 +1,49 @@
+name: dd-founder
+display_name: DD Founder Agent
+description: Background checks, track record verification, and controversy detection for founders
+tagline: Trust but verify
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "2"
+  memory: "4g"
+
+capabilities:
+  - background-research
+  - social-media-analysis
+  - track-record-verification
+  - red-flag-detection
+
+use_cases:
+  - "Verify founder claims and credentials"
+  - "Research previous ventures and exits"
+  - "Detect controversies or legal issues"
+  - "Assess founder-market fit"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: founders_researched
+    type: counter
+    label: "Founders Researched"
+    description: "Total founders analyzed"
+
+  - name: red_flags_found
+    type: counter
+    label: "Red Flags"
+    description: "Red flags identified"
+
+  - name: research_status
+    type: status
+    label: "Status"
+    description: "Current research status"
+    values:
+      - value: "researching"
+        color: "blue"
+        label: "Researching"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

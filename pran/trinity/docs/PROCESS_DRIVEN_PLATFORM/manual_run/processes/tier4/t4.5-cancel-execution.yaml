@@ -1,0 +1,58 @@
+# T4.5 - Cancel Running Execution
+# 
+# Purpose: Validate execution cancellation
+# Agent: process-worker (for slow step), process-echo
+# Expected: Running execution can be cancelled
+
+name: t4.5-cancel-execution
+version: "1.0"
+description: "Cancel execution test - validates cancellation flow"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: step1
+    name: Step 1 (completes fast)
+    type: agent_task
+    agent: process-echo
+    message: "Step 1 completing"
+    timeout: 120s
+
+  - id: slow-step
+    name: Slow Step (cancel during this)
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - step1
+    message: |
+      Please perform an extremely detailed analysis:
+      1. Write a comprehensive 5000 word research paper
+      2. Include detailed analysis with many sections
+      3. Review and revise multiple times
+      This is designed to take a long time so we can cancel it.
+    timeout: 600s  # Long timeout so we can cancel
+
+  - id: step3
+    name: Step 3 (should not run)
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - slow-step
+    message: "This should not execute"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution
+# 2. Wait for slow-step to start
+# 3. Call cancel API: POST /api/executions/{id}/cancel
+# 4. Verify execution is cancelled
+
+# Verification Checklist:
+# [ ] step1 completes
+# [ ] slow-step starts and runs
+# [ ] Cancel API is called
+# [ ] Execution status: CANCELLED
+# [ ] slow-step status: CANCELLED or FAILED
+# [ ] step3 status: PENDING (never started)

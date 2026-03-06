@@ -1,0 +1,58 @@
+name: "{{name}}"
+version: "1.0"
+description: "Automated data analysis and reporting workflow"
+
+triggers:
+  - type: manual
+    id: manual-trigger
+
+steps:
+  - id: gather-data
+    name: Gather Data
+    type: agent_task
+    agent: data-collector
+    message: |
+      Please collect and prepare the data for analysis.
+
+      Data source: {{input.data_source}}
+      Time range: {{input.time_range | default("last 7 days")}}
+      Metrics: {{input.metrics | default("all")}}
+    output_key: raw_data
+
+  - id: analyze-data
+    name: Analyze Data
+    type: agent_task
+    depends_on:
+      - gather-data
+    agent: data-analyst
+    message: |
+      Please analyze the following data and identify:
+      - Key trends and patterns
+      - Anomalies or outliers
+      - Actionable insights
+      - Recommendations
+
+      Data:
+      {{steps.gather-data.output}}
+    output_key: analysis
+
+  - id: generate-report
+    name: Generate Report
+    type: agent_task
+    depends_on:
+      - analyze-data
+    agent: report-writer
+    message: |
+      Please create a professional report based on the analysis:
+
+      Analysis Summary:
+      {{steps.analyze-data.output}}
+
+      Report format: {{input.report_format | default("executive summary")}}
+    output_key: report
+
+outputs:
+  - name: report
+    source: "{{steps.generate-report.output}}"
+  - name: key_insights
+    source: "{{steps.analyze-data.output.insights}}"

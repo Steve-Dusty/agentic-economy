@@ -1,0 +1,153 @@
+{
+  "project": {
+    "name": "Trinity Agent Platform",
+    "version": "1.0.0",
+    "description": "Universal infrastructure for deploying Claude Code agent configurations",
+    "repository": "project_trinity",
+    "last_updated": "2026-03-01T10:13:00Z"
+  },
+  "tech_stack": {
+    "frontend": ["Vue.js 3.5", "Tailwind CSS 3.4", "Pinia 2.3", "Vite 6", "Auth0 Vue"],
+    "backend": ["FastAPI 0.115", "Python 3.11", "Docker SDK 7.1", "SQLite", "Redis 5.2"],
+    "agent_runtime": ["Python 3.11", "Node.js 20", "Go 1.23", "Claude Code"],
+    "infrastructure": ["Docker", "nginx", "GCP", "Let's Encrypt"]
+  },
+  "features": {
+    "implemented": [
+      "agent_creation",
+      "agent_start_stop",
+      "agent_rename",
+      "agent_deletion",
+      "agent_logs",
+      "agent_live_telemetry",
+      "auth0_google_oauth",
+      "domain_restriction",
+      "dev_mode_bypass",
+      "session_persistence",
+      "agent_sharing",
+      "manual_credential_entry",
+      "oauth2_flows",
+      "credential_hot_reload",
+      "bulk_credential_import",
+      "credential_requirements_extraction",
+      "local_templates",
+      "github_templates",
+      "template_metadata_extraction",
+      "credential_schema_detection",
+      "chat_via_backend_api",
+      "conversation_history",
+      "context_window_tracking",
+      "session_cost_tracking",
+      "new_session_reset",
+      "unified_activity_panel",
+      "realtime_tool_display",
+      "tool_chips_with_counts",
+      "expandable_timeline",
+      "drill_down_modal",
+      "trinity_mcp_server",
+      "mcp_api_key_auth",
+      "per_user_api_keys",
+      "usage_statistics",
+      "docker_source_of_truth",
+      "sqlite_persistence",
+      "redis_secrets",
+      "audit_logging",
+      "container_security",
+      "gcp_production_deployment",
+      "mcp_key_auto_creation",
+      "first_time_setup_ux"
+    ],
+    "in_progress": [
+      "github_native_agents"
+    ],
+    "planned": [
+      "agent_git_push",
+      "automated_secret_rotation",
+      "kubernetes_deployment"
+    ]
+  },
+  "api_endpoints": {
+    "total": 35,
+    "by_category": {
+      "agents": 12,
+      "credentials": 8,
+      "templates": 4,
+      "sharing": 3,
+      "auth_mcp": 8
+    }
+  },
+  "services": {
+    "frontend": {
+      "port_local": 3000,
+      "port_prod": 3005,
+      "framework": "Vue.js 3"
+    },
+    "backend": {
+      "port_local": 8000,
+      "port_prod": 8005,
+      "framework": "FastAPI"
+    },
+    "mcp_server": {
+      "port_local": 8080,
+      "port_prod": 8007,
+      "framework": "FastMCP",
+      "tools_count": 13
+    },
+    "audit_logger": {
+      "port_local": 8001,
+      "port_prod": 8006,
+      "framework": "FastAPI"
+    },
+    "redis": {
+      "port": 6379,
+      "purpose": "secrets_and_cache"
+    }
+  },
+  "deployment": {
+    "production_url": "https://your-domain.com",
+    "vm": "your-vm-name",
+    "ip": "your-server-ip",
+    "gcp_project": "your-gcp-project",
+    "zone": "us-central1-a"
+  },
+  "key_files": {
+    "backend": [
+      "src/backend/main.py",
+      "src/backend/database.py",
+      "src/backend/routers/credentials.py",
+      "src/backend/services/credential_encryption.py"
+    ],
+    "frontend": [
+      "src/frontend/src/views/AgentDetail.vue",
+      "src/frontend/src/stores/agents.js",
+      "src/frontend/src/stores/auth.js"
+    ],
+    "agent": [
+      "docker/base-image/agent-server.py",
+      "docker/base-image/Dockerfile"
+    ],
+    "config": [
+      "docker-compose.yml",
+      "docker-compose.prod.yml"
+    ]
+  },
+  "memory_files": {
+    "requirements": "docs/memory/requirements.md",
+    "architecture": "docs/memory/architecture.md",
+    "roadmap": "docs/memory/roadmap.md",
+    "changelog": "docs/memory/changelog.md",
+    "feature_flows": "docs/memory/feature-flows.md"
+  },
+  "phases": {
+    "completed": [
+      "phase_1_base_infrastructure",
+      "phase_2_web_management",
+      "phase_3_enhanced_security",
+      "phase_3.5_credential_management",
+      "phase_4_multi_agent_support",
+      "phase_5_sharing_observability"
+    ],
+    "current": "phase_6_github_native_polish",
+    "status": "in_progress"
+  }
+}

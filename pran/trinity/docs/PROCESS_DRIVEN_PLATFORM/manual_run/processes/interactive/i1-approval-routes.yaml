@@ -1,0 +1,63 @@
+# I1 - Approval Decision Routes to Different Paths
+#
+# Purpose: Test approval decision driving gateway routing
+# Interaction: Approve or Reject to see different paths execute
+#
+# Expected Behavior:
+# - If APPROVED: high-priority path runs
+# - If REJECTED: revision path runs (via on_error skip)
+
+name: i1-approval-routes
+version: "1.0"
+description: Approval decision routes to different agent paths
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: prepare-draft
+    name: Prepare Draft
+    type: agent_task
+    agent: process-echo
+    message: Preparing draft content for manager review
+    timeout: 120s
+
+  - id: manager-approval
+    name: Manager Approval
+    type: human_approval
+    depends_on: [prepare-draft]
+    description: |
+      Draft prepared and ready for review.
+
+      APPROVE: Content will be published immediately
+      REJECT: Content will go back for revision
+    timeout: 30m
+    on_error:
+      action: skip_step
+
+  - id: publish-content
+    name: Publish Content
+    type: agent_task
+    agent: process-worker
+    depends_on: [manager-approval]
+    condition: steps.manager-approval.output.decision == 'approved'
+    message: Content APPROVED - publishing to production now
+    timeout: 120s
+
+  - id: revise-content
+    name: Revise Content
+    type: agent_task
+    agent: process-echo
+    depends_on: [manager-approval]
+    condition: steps.manager-approval.status == 'skipped'
+    message: Content REJECTED - preparing revision notes
+    timeout: 120s
+
+  - id: notify-complete
+    name: Notify Complete
+    type: agent_task
+    agent: process-echo
+    depends_on: [publish-content, revise-content]
+    message: Workflow complete - outcome recorded
+    timeout: 120s

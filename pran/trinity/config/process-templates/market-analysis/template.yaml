@@ -1,0 +1,23 @@
+name: market-analysis
+display_name: Market Analysis Pipeline
+description: Comprehensive market analysis workflow from research to client-ready report
+category: consulting
+complexity: intermediate
+version: "1.0.0"
+author: Acme Consulting
+
+tags:
+  - consulting
+  - market-research
+  - analysis
+  - reports
+
+step_types_used:
+  - agent_task
+  - human_approval
+  - gateway
+
+use_cases:
+  - "Market entry analysis"
+  - "Competitive landscape assessment"
+  - "Industry trend reports"

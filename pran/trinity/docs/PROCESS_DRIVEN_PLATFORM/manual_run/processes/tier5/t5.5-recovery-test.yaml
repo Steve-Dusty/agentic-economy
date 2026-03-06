@@ -1,0 +1,63 @@
+# T5.5 - Recovery After Backend Restart
+# 
+# Purpose: Test ExecutionRecoveryService on backend restart
+# Agent: process-worker
+# Expected: Running execution is recovered after restart
+#
+# NOTE: This test requires manual intervention (restart backend)
+
+name: t5.5-recovery-test
+version: "1.0"
+description: "Recovery test - validates execution recovery after backend restart"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: step1
+    name: Step 1 (complete before restart)
+    type: agent_task
+    agent: process-echo
+    message: "Step 1 completing"
+    timeout: 120s
+
+  - id: slow-step
+    name: Slow Step (restart during this)
+    type: agent_task
+    agent: process-worker
+    depends_on: [step1]
+    message: |
+      Please perform an extremely detailed analysis:
+      1. Write a comprehensive 3000 word research paper
+      2. Include detailed sections
+      3. Review and revise multiple times
+      This is designed to take a long time.
+    timeout: 600s
+
+  - id: step3
+    name: Step 3 (should run after recovery)
+    type: agent_task
+    agent: process-echo
+    depends_on: [slow-step]
+    message: "Step 3 - running after recovery"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution
+# 2. Wait for step1 to complete and slow-step to start
+# 3. Restart backend: docker-compose restart backend
+# 4. Check execution status via API
+# 5. Verify recovery service resumed the execution
+# 6. Wait for completion
+
+# API to check recovery:
+# GET /api/executions/recovery/status
+
+# Verification Checklist:
+# [ ] step1 completes before restart
+# [ ] slow-step is RUNNING when restart happens
+# [ ] Backend restarts successfully
+# [ ] Recovery service finds the execution
+# [ ] step3 eventually runs
+# [ ] Execution status: COMPLETED

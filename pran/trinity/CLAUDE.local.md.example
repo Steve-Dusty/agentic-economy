@@ -1,0 +1,47 @@
+# Local Development Configuration
+
+> **Private file** - Copy this to `CLAUDE.local.md` and customize for your environment.
+> `CLAUDE.local.md` is gitignored - your settings won't be committed.
+
+## Development Environment
+
+| Setting | Value |
+|---------|-------|
+| **Environment** | localhost |
+| **Web UI** | http://localhost |
+| **Backend API** | http://localhost:8000 |
+| **MCP Server** | http://localhost:8080/mcp |
+
+## My Identity
+
+| Setting | Value |
+|---------|-------|
+| **Primary Email** | user@example.com |
+| **Admin Email** | admin@example.com |
+| **Domain Restriction** | @your-domain.com |
+
+## Local Ports
+
+| Service | Port |
+|---------|------|
+| Frontend (nginx/Vite) | 80 |
+| Backend (FastAPI) | 8000 |
+| MCP Server | 8080 |
+| Vector (logs) | 8686 |
+| Redis | 6379 |
+| Agent SSH | 2222-2262 |
+
+## Quick Access
+
+- **Web UI**: http://localhost
+- **API Docs**: http://localhost:8000/docs
+- **MCP Endpoint**: http://localhost:8080/mcp
+
+---
+
+## How to Use
+
+1. Copy this file: `cp CLAUDE.local.md.example CLAUDE.local.md`
+2. Replace identity placeholders with your actual values
+3. Claude Code will automatically load this alongside CLAUDE.md
+4. Your local settings won't be committed to the repository

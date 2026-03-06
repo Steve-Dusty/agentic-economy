@@ -1,0 +1,233 @@
+{
+  "name": {
+    "title": "Process Name",
+    "description": "A unique identifier for your process. Used in URLs and API calls.",
+    "type": "string",
+    "required": true,
+    "example": "content-review-workflow",
+    "docs_link": "/processes/docs/reference/yaml-schema"
+  },
+  "version": {
+    "title": "Version",
+    "description": "Semantic version of your process definition. Increment when making changes.",
+    "type": "string",
+    "required": false,
+    "default": "1.0",
+    "example": "1.0.0",
+    "docs_link": "/processes/docs/reference/yaml-schema"
+  },
+  "description": {
+    "title": "Description",
+    "description": "Human-readable description of what this process does. Shown in the process list.",
+    "type": "string",
+    "required": false,
+    "example": "Automates content review with AI analysis and human approval"
+  },
+  "triggers": {
+    "title": "Triggers",
+    "description": "Define how this process can be started. Processes can have multiple triggers.",
+    "type": "array",
+    "required": true,
+    "example": "triggers:\n  - type: manual\n    id: manual-start",
+    "docs_link": "/processes/docs/reference/triggers"
+  },
+  "triggers.type": {
+    "title": "Trigger Type",
+    "description": "How the process is started: 'manual' (user-initiated), 'webhook' (HTTP POST), or 'schedule' (cron).",
+    "type": "string",
+    "required": true,
+    "options": ["manual", "webhook", "schedule"],
+    "docs_link": "/processes/docs/reference/triggers"
+  },
+  "triggers.id": {
+    "title": "Trigger ID",
+    "description": "Unique identifier for this trigger within the process.",
+    "type": "string",
+    "required": true,
+    "example": "daily-trigger"
+  },
+  "triggers.schedule": {
+    "title": "Schedule (Cron)",
+    "description": "Cron expression for scheduled triggers. Format: minute hour day-of-month month day-of-week.",
+    "type": "string",
+    "required": false,
+    "example": "0 9 * * MON-FRI",
+    "docs_link": "/processes/docs/reference/triggers"
+  },
+  "steps": {
+    "title": "Steps",
+    "description": "The sequence of tasks that make up your workflow. Steps can run sequentially or in parallel.",
+    "type": "array",
+    "required": true,
+    "docs_link": "/processes/docs/getting-started/step-types"
+  },
+  "steps.id": {
+    "title": "Step ID",
+    "description": "Unique identifier for this step. Referenced by depends_on and variable interpolation.",
+    "type": "string",
+    "required": true,
+    "example": "analyze-content"
+  },
+  "steps.name": {
+    "title": "Step Name",
+    "description": "Human-readable name shown in the execution timeline.",
+    "type": "string",
+    "required": false,
+    "example": "Analyze Content Quality"
+  },
+  "steps.type": {
+    "title": "Step Type",
+    "description": "The type of step determines what action is performed.",
+    "type": "string",
+    "required": true,
+    "options": ["agent_task", "human_approval", "gateway", "timer", "notification", "sub_process"],
+    "docs_link": "/processes/docs/getting-started/step-types"
+  },
+  "steps.agent": {
+    "title": "Agent",
+    "description": "The agent (by name or ID) that will execute this task. Must be a running agent.",
+    "type": "string",
+    "required": true,
+    "example": "content-reviewer"
+  },
+  "steps.message": {
+    "title": "Message/Prompt",
+    "description": "The instruction sent to the agent. Supports variable interpolation with {{...}} syntax.",
+    "type": "string",
+    "required": true,
+    "example": "Analyze this content: {{input.content}}",
+    "docs_link": "/processes/docs/reference/variables"
+  },
+  "steps.depends_on": {
+    "title": "Dependencies",
+    "description": "List of step IDs that must complete before this step runs. Creates sequential/parallel flow.",
+    "type": "array",
+    "required": false,
+    "example": "depends_on:\n  - step-1\n  - step-2",
+    "docs_link": "/processes/docs/patterns/sequential"
+  },
+  "steps.timeout": {
+    "title": "Timeout",
+    "description": "Maximum time this step can run. Format: number + unit (s, m, h). Step fails if exceeded.",
+    "type": "string",
+    "required": false,
+    "default": "30m",
+    "example": "10m"
+  },
+  "steps.output_key": {
+    "title": "Output Key",
+    "description": "Name for storing this step's output. Access later with {{steps.step_id.output.key}}.",
+    "type": "string",
+    "required": false,
+    "example": "analysis_result"
+  },
+  "steps.title": {
+    "title": "Approval Title",
+    "description": "Title shown in the approval dialog for human_approval steps.",
+    "type": "string",
+    "required": false,
+    "example": "Content Review Required"
+  },
+  "steps.description": {
+    "title": "Approval Description",
+    "description": "Detailed description shown to approvers. Supports variable interpolation.",
+    "type": "string",
+    "required": false
+  },
+  "steps.assignees": {
+    "title": "Assignees",
+    "description": "List of users who can approve this step. If empty, any user can approve.",
+    "type": "array",
+    "required": false,
+    "example": "assignees:\n  - alice\n  - bob"
+  },
+  "steps.gateway_type": {
+    "title": "Gateway Type",
+    "description": "How routing decisions are made: 'exclusive' (first match), 'parallel' (all routes).",
+    "type": "string",
+    "required": false,
+    "default": "exclusive",
+    "options": ["exclusive", "parallel"],
+    "docs_link": "/processes/docs/patterns/parallel"
+  },
+  "steps.routes": {
+    "title": "Gateway Routes",
+    "description": "Conditional routing rules for gateway steps. Each route has a condition and target.",
+    "type": "array",
+    "required": false,
+    "docs_link": "/processes/docs/getting-started/step-types"
+  },
+  "steps.routes.condition": {
+    "title": "Route Condition",
+    "description": "Expression that determines if this route is taken. Uses {{...}} variable syntax.",
+    "type": "string",
+    "required": true,
+    "example": "{{steps.analyze.output.score}} >= 80"
+  },
+  "steps.routes.target": {
+    "title": "Route Target",
+    "description": "Step ID to execute if this route's condition is true.",
+    "type": "string",
+    "required": true
+  },
+  "steps.default_route": {
+    "title": "Default Route",
+    "description": "Step ID to execute if no route conditions match.",
+    "type": "string",
+    "required": false
+  },
+  "steps.delay": {
+    "title": "Timer Delay",
+    "description": "How long to wait for timer steps. Format: number + unit (s, m, h, d).",
+    "type": "string",
+    "required": true,
+    "example": "30m"
+  },
+  "steps.process_id": {
+    "title": "Sub-Process ID",
+    "description": "The ID of another process to execute as a sub-process.",
+    "type": "string",
+    "required": true,
+    "docs_link": "/processes/docs/getting-started/step-types"
+  },
+  "steps.channel": {
+    "title": "Notification Channel",
+    "description": "Where to send notifications: 'email', 'slack', or 'webhook'.",
+    "type": "string",
+    "required": true,
+    "options": ["email", "slack", "webhook"]
+  },
+  "steps.recipients": {
+    "title": "Recipients",
+    "description": "List of recipients for the notification. Format depends on channel type.",
+    "type": "array",
+    "required": false,
+    "example": "recipients:\n  - user@example.com"
+  },
+  "outputs": {
+    "title": "Outputs",
+    "description": "Define process outputs that can be accessed after completion.",
+    "type": "array",
+    "required": false,
+    "docs_link": "/processes/docs/reference/yaml-schema"
+  },
+  "outputs.name": {
+    "title": "Output Name",
+    "description": "Name for this output value.",
+    "type": "string",
+    "required": true
+  },
+  "outputs.value": {
+    "title": "Output Value",
+    "description": "Expression to compute the output value. Uses {{...}} variable syntax.",
+    "type": "string",
+    "required": true,
+    "example": "{{steps.final-step.output}}"
+  },
+  "default": {
+    "title": "YAML Process Definition",
+    "description": "Define automated workflows using YAML. Processes orchestrate AI agents through steps with dependencies, conditions, and approvals.",
+    "type": "object",
+    "docs_link": "/processes/docs/getting-started/what-are-processes"
+  }
+}

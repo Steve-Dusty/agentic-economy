@@ -1,0 +1,1182 @@
+"""
+SQLite persistence layer for Trinity platform.
+
+This module provides the DatabaseManager class - a facade for all database operations.
+The actual implementations are organized in submodules under db/:
+- db/migrations.py: Schema migrations
+- db/schema.py: Table and index definitions
+- db/users.py: User management
+- db/agents.py: Agent ownership and sharing
+- db/mcp_keys.py: MCP API key management
+- db/schedules.py: Schedule and execution management
+- db/chat.py: Chat session and message persistence
+- db/activities.py: Activity stream logging
+
+For backward compatibility, all models and the global `db` instance are
+re-exported from this module.
+
+Redis is still used for:
+- Credential secrets (fast access)
+- OAuth state (ephemeral, TTL-based)
+- Sessions/cache
+"""
+
+import os
+from datetime import datetime
+from pathlib import Path
+
+# Re-export models for backward compatibility
+from db_models import (
+    UserCreate,
+    User,
+    AgentOwnership,
+    AgentShare,
+    AgentShareRequest,
+    McpApiKeyCreate,
+    McpApiKey,
+    McpApiKeyWithSecret,
+    McpAgentKeyCreate,
+    ScheduleCreate,
+    Schedule,
+    ScheduleExecution,
+    AgentGitConfig,
+    GitSyncResult,
+    ChatSession,
+    ChatMessage,
+    AgentPermission,
+    AgentPermissionInfo,
+    SharedFolderConfig,
+    SharedFolderConfigUpdate,
+    SharedFolderMount,
+    SharedFolderInfo,
+    SystemSetting,
+    SystemSettingUpdate,
+    # Public Agent Links (Phase 12.2)
+    PublicLinkCreate,
+    PublicLink,
+    PublicLinkUpdate,
+    PublicLinkWithUrl,
+    PublicLinkInfo,
+    VerificationRequest,
+    VerificationConfirm,
+    VerificationResponse,
+    PublicChatRequest,
+    PublicChatResponse,
+    # Public Chat Persistence (Phase 12.2.5)
+    PublicChatSession,
+    PublicChatMessage,
+    # Email Authentication (Phase 12.4)
+    EmailWhitelistEntry,
+    EmailWhitelistAdd,
+    EmailLoginRequest,
+    EmailLoginVerify,
+    EmailLoginResponse,
+    # Agent Notifications (NOTIF-001)
+    NotificationCreate,
+    Notification,
+    NotificationList,
+    NotificationAcknowledge,
+    # Subscription Credential Models (SUB-001)
+    SubscriptionCredentialCreate,
+    SubscriptionCredential,
+    SubscriptionWithAgents,
+    AgentAuthStatus,
+    # Monitoring Models (MON-001)
+    AgentHealthStatus,
+    HealthCheckType,
+    DockerHealthCheck,
+    NetworkHealthCheck,
+    BusinessHealthCheck,
+    AgentHealthDetail,
+    AgentHealthSummary,
+    FleetHealthSummary,
+    FleetHealthStatus,
+    MonitoringConfig,
+    HealthCheckRecord,
+)
+
+# Re-export connection utilities
+from db.connection import get_db_connection, DB_PATH
+
+# Import schema and migration utilities
+from db.migrations import run_all_migrations
+from db.schema import init_schema
+
+# Import operation classes
+from db.users import UserOperations
+from db.agents import AgentOperations
+from db.mcp_keys import McpKeyOperations
+from db.schedules import ScheduleOperations
+from db.chat import ChatOperations
+from db.activities import ActivityOperations
+from db.permissions import PermissionOperations
+from db.shared_folders import SharedFolderOperations
+from db.settings import SettingsOperations
+from db.public_links import PublicLinkOperations
+from db.email_auth import EmailAuthOperations
+from db.skills import SkillsOperations
+from db.public_chat import PublicChatOperations
+from db.tags import TagOperations
+from db.system_views import SystemViewOperations
+from db.notifications import NotificationOperations
+from db.subscriptions import SubscriptionOperations
+from db.monitoring import MonitoringOperations
+from db.dashboard_history import DashboardHistoryOperations
+from db.slack import SlackOperations
+from db.nevermined import NeverminedOperations
+
+
+def init_database():
+    """Initialize the SQLite database with all required tables.
+
+    1. Creates database directory if needed
+    2. Runs all migrations (idempotent)
+    3. Creates schema (tables and indexes)
+    4. Ensures admin user exists
+    """
+    db_path = Path(DB_PATH)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+
+        # Run migrations first (if tables exist)
+        run_all_migrations(cursor, conn)
+
+        # Create schema (tables and indexes)
+        init_schema(cursor, conn)
+
+        # Create default admin user if not exists
+        _ensure_admin_user(cursor, conn)
+
+
+def _ensure_admin_user(cursor, conn):
+    """Ensure the admin user exists with properly hashed password."""
+    admin_password = os.getenv("ADMIN_PASSWORD", "")
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+
+    cursor.execute("SELECT id, password_hash FROM users WHERE username = ?", (admin_username,))
+    existing = cursor.fetchone()
+
+    if existing is None:
+        # Create admin user
+        if not admin_password:
+            print("WARNING: ADMIN_PASSWORD not set - skipping admin user creation")
+            print("         Set ADMIN_PASSWORD environment variable to create admin user")
+            return
+
+        now = datetime.utcnow().isoformat()
+        # Hash password using bcrypt
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        hashed = pwd_context.hash(admin_password)
+
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (admin_username, hashed, "admin", now, now))
+        conn.commit()
+        print(f"Created admin user '{admin_username}' with hashed password")
+    else:
+        # Check if existing password needs update (migration or change)
+        existing_hash = existing[1]
+        should_update = False
+
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+        if existing_hash and not existing_hash.startswith("$2"):
+            # Password is likely plaintext (bcrypt hashes start with $2)
+            if admin_password and existing_hash == admin_password:
+                should_update = True
+                print(f"Migrating admin user '{admin_username}' password from plaintext to bcrypt")
+        elif admin_password:
+            # Check if environment password matches DB hash
+            try:
+                if not pwd_context.verify(admin_password, existing_hash):
+                    should_update = True
+                    print(f"Environment password changed - updating admin user '{admin_username}'")
+            except Exception as e:
+                print(f"Error verifying password hash: {e}")
+                should_update = True
+
+        if should_update and admin_password:
+            hashed = pwd_context.hash(admin_password)
+            cursor.execute("""
+                UPDATE users SET password_hash = ?, updated_at = ?
+                WHERE username = ?
+            """, (hashed, datetime.utcnow().isoformat(), admin_username))
+            conn.commit()
+
+
+class DatabaseManager:
+    """
+    Manages SQLite database operations for Trinity platform.
+
+    This class composes operations from specialized submodules:
+    - User management: db/users.py
+    - Agent ownership/sharing: db/agents.py
+    - MCP API keys: db/mcp_keys.py
+    - Schedules/executions: db/schedules.py
+    - Chat sessions/messages: db/chat.py
+    - Activity stream: db/activities.py
+
+    All methods are delegated to the appropriate submodule while
+    maintaining the same interface for backward compatibility.
+    """
+
+    def __init__(self):
+        init_database()
+
+        # Initialize operation handlers
+        self._user_ops = UserOperations()
+        self._agent_ops = AgentOperations(self._user_ops)
+        self._mcp_key_ops = McpKeyOperations(self._user_ops)
+        self._schedule_ops = ScheduleOperations(self._user_ops, self._agent_ops)
+        self._chat_ops = ChatOperations()
+        self._activity_ops = ActivityOperations()
+        self._permission_ops = PermissionOperations(self._user_ops, self._agent_ops)
+        self._shared_folder_ops = SharedFolderOperations(self._permission_ops)
+        self._settings_ops = SettingsOperations()
+        self._public_link_ops = PublicLinkOperations(self._user_ops, self._agent_ops)
+        self._email_auth_ops = EmailAuthOperations(self._user_ops)
+        self._skills_ops = SkillsOperations()
+        self._public_chat_ops = PublicChatOperations()
+        self._tag_ops = TagOperations()
+        self._system_view_ops = SystemViewOperations()
+        self._notification_ops = NotificationOperations()
+        self._subscription_ops = SubscriptionOperations()
+        self._monitoring_ops = MonitoringOperations()
+        self._dashboard_history_ops = DashboardHistoryOperations()
+        self._slack_ops = SlackOperations()
+        self._nevermined_ops = NeverminedOperations()
+
+    # =========================================================================
+    # User Management (delegated to db/users.py)
+    # =========================================================================
+
+    def get_user_by_username(self, username: str):
+        return self._user_ops.get_user_by_username(username)
+
+    def get_user_by_auth0_sub(self, auth0_sub: str):
+        return self._user_ops.get_user_by_auth0_sub(auth0_sub)
+
+    def get_user_by_id(self, user_id: int):
+        return self._user_ops.get_user_by_id(user_id)
+
+    def get_user_by_email(self, email: str):
+        return self._user_ops.get_user_by_email(email)
+
+    def create_user(self, user_data: UserCreate):
+        return self._user_ops.create_user(user_data)
+
+    def update_user(self, username: str, updates: dict):
+        return self._user_ops.update_user(username, updates)
+
+    def update_last_login(self, username: str):
+        return self._user_ops.update_last_login(username)
+
+    def update_user_password(self, username: str, hashed_password: str):
+        return self._user_ops.update_user_password(username, hashed_password)
+
+    def get_or_create_auth0_user(self, auth0_sub: str, email: str, name: str = None, picture: str = None):
+        return self._user_ops.get_or_create_auth0_user(auth0_sub, email, name, picture)
+
+    def list_users(self):
+        return self._user_ops.list_users()
+
+    # =========================================================================
+    # Agent Ownership Management (delegated to db/agents.py)
+    # =========================================================================
+
+    def register_agent_owner(self, agent_name: str, owner_username: str, is_system: bool = False):
+        return self._agent_ops.register_agent_owner(agent_name, owner_username, is_system)
+
+    def get_agent_owner(self, agent_name: str):
+        return self._agent_ops.get_agent_owner(agent_name)
+
+    def get_agents_by_owner(self, owner_username: str):
+        return self._agent_ops.get_agents_by_owner(owner_username)
+
+    def delete_agent_ownership(self, agent_name: str):
+        return self._agent_ops.delete_agent_ownership(agent_name)
+
+    def rename_agent(self, old_name: str, new_name: str):
+        return self._agent_ops.rename_agent(old_name, new_name)
+
+
+    def can_user_access_agent(self, username: str, agent_name: str):
+        return self._agent_ops.can_user_access_agent(username, agent_name)
+
+    def can_user_delete_agent(self, username: str, agent_name: str):
+        return self._agent_ops.can_user_delete_agent(username, agent_name)
+
+    def can_user_rename_agent(self, username: str, agent_name: str):
+        return self._agent_ops.can_user_rename_agent(username, agent_name)
+
+    def is_system_agent(self, agent_name: str):
+        return self._agent_ops.is_system_agent(agent_name)
+
+    # =========================================================================
+    # Agent Sharing Management (delegated to db/agents.py)
+    # =========================================================================
+
+    def share_agent(self, agent_name: str, owner_username: str, share_with_email: str):
+        return self._agent_ops.share_agent(agent_name, owner_username, share_with_email)
+
+    def unshare_agent(self, agent_name: str, owner_username: str, share_with_email: str):
+        return self._agent_ops.unshare_agent(agent_name, owner_username, share_with_email)
+
+    def get_agent_shares(self, agent_name: str):
+        return self._agent_ops.get_agent_shares(agent_name)
+
+    def get_shared_agents(self, username: str):
+        return self._agent_ops.get_shared_agents(username)
+
+    def is_agent_shared_with_user(self, agent_name: str, username: str):
+        return self._agent_ops.is_agent_shared_with_user(agent_name, username)
+
+    def can_user_share_agent(self, username: str, agent_name: str):
+        return self._agent_ops.can_user_share_agent(username, agent_name)
+
+    def delete_agent_shares(self, agent_name: str):
+        return self._agent_ops.delete_agent_shares(agent_name)
+
+    # =========================================================================
+    # Agent API Key Settings (delegated to db/agents.py)
+    # =========================================================================
+
+    def get_use_platform_api_key(self, agent_name: str):
+        return self._agent_ops.get_use_platform_api_key(agent_name)
+
+    def set_use_platform_api_key(self, agent_name: str, use_platform_key: bool):
+        return self._agent_ops.set_use_platform_api_key(agent_name, use_platform_key)
+
+    # =========================================================================
+    # Agent Autonomy Mode (delegated to db/agents.py)
+    # =========================================================================
+
+    def get_autonomy_enabled(self, agent_name: str):
+        return self._agent_ops.get_autonomy_enabled(agent_name)
+
+    def set_autonomy_enabled(self, agent_name: str, enabled: bool):
+        return self._agent_ops.set_autonomy_enabled(agent_name, enabled)
+
+    def get_all_agents_autonomy_status(self):
+        return self._agent_ops.get_all_agents_autonomy_status()
+
+    # =========================================================================
+    # Batch Metadata Query (N+1 Fix) - delegated to db/agents.py
+    # =========================================================================
+
+    def get_all_agent_metadata(self, user_email: str = None):
+        return self._agent_ops.get_all_agent_metadata(user_email)
+
+    def get_accessible_agent_names(self, user_email: str, is_admin: bool = False):
+        """Get list of agent names the user can access (owned + shared, or all if admin)."""
+        return self._agent_ops.get_accessible_agent_names(user_email, is_admin)
+
+    # =========================================================================
+    # Agent Resource Limits (delegated to db/agents.py)
+    # =========================================================================
+
+    def get_resource_limits(self, agent_name: str):
+        return self._agent_ops.get_resource_limits(agent_name)
+
+    def set_resource_limits(self, agent_name: str, memory: str = None, cpu: str = None):
+        return self._agent_ops.set_resource_limits(agent_name, memory, cpu)
+
+    # =========================================================================
+    # Agent Read-Only Mode (delegated to db/agents.py)
+    # =========================================================================
+
+    def get_read_only_mode(self, agent_name: str):
+        return self._agent_ops.get_read_only_mode(agent_name)
+
+    def set_read_only_mode(self, agent_name: str, enabled: bool, config: dict = None):
+        return self._agent_ops.set_read_only_mode(agent_name, enabled, config)
+
+    # =========================================================================
+    # Parallel Capacity (delegated to db/agents.py) - CAPACITY-001
+    # =========================================================================
+
+    def get_max_parallel_tasks(self, agent_name: str):
+        return self._agent_ops.get_max_parallel_tasks(agent_name)
+
+    def set_max_parallel_tasks(self, agent_name: str, max_tasks: int):
+        return self._agent_ops.set_max_parallel_tasks(agent_name, max_tasks)
+
+    def get_all_agents_parallel_capacity(self):
+        return self._agent_ops.get_all_agents_parallel_capacity()
+
+    # =========================================================================
+    # MCP API Key Management (delegated to db/mcp_keys.py)
+    # =========================================================================
+
+    def create_mcp_api_key(self, username: str, key_data: McpApiKeyCreate):
+        return self._mcp_key_ops.create_mcp_api_key(username, key_data)
+
+    def create_agent_mcp_api_key(self, agent_name: str, owner_username: str, description: str = None):
+        return self._mcp_key_ops.create_agent_mcp_api_key(agent_name, owner_username, description)
+
+    def get_agent_mcp_api_key(self, agent_name: str):
+        return self._mcp_key_ops.get_agent_mcp_api_key(agent_name)
+
+    def delete_agent_mcp_api_key(self, agent_name: str):
+        return self._mcp_key_ops.delete_agent_mcp_api_key(agent_name)
+
+    def validate_mcp_api_key(self, api_key: str):
+        return self._mcp_key_ops.validate_mcp_api_key(api_key)
+
+    def get_mcp_api_key(self, key_id: str, username: str):
+        return self._mcp_key_ops.get_mcp_api_key(key_id, username)
+
+    def list_mcp_api_keys(self, username: str):
+        return self._mcp_key_ops.list_mcp_api_keys(username)
+
+    def list_all_mcp_api_keys(self):
+        return self._mcp_key_ops.list_all_mcp_api_keys()
+
+    def revoke_mcp_api_key(self, key_id: str, username: str):
+        return self._mcp_key_ops.revoke_mcp_api_key(key_id, username)
+
+    def delete_mcp_api_key(self, key_id: str, username: str):
+        return self._mcp_key_ops.delete_mcp_api_key(key_id, username)
+
+    # =========================================================================
+    # Schedule Management (delegated to db/schedules.py)
+    # =========================================================================
+
+    def create_schedule(self, agent_name: str, username: str, schedule_data: ScheduleCreate):
+        return self._schedule_ops.create_schedule(agent_name, username, schedule_data)
+
+    def get_schedule(self, schedule_id: str):
+        return self._schedule_ops.get_schedule(schedule_id)
+
+    def list_agent_schedules(self, agent_name: str):
+        return self._schedule_ops.list_agent_schedules(agent_name)
+
+    def list_all_enabled_schedules(self):
+        return self._schedule_ops.list_all_enabled_schedules()
+
+    def list_all_disabled_schedules(self):
+        return self._schedule_ops.list_all_disabled_schedules()
+
+    def list_all_schedules(self):
+        """List all schedules across all agents."""
+        return self._schedule_ops.list_all_schedules()
+
+    def update_schedule(self, schedule_id: str, username: str, updates: dict):
+        return self._schedule_ops.update_schedule(schedule_id, username, updates)
+
+    def delete_schedule(self, schedule_id: str, username: str):
+        return self._schedule_ops.delete_schedule(schedule_id, username)
+
+    def set_schedule_enabled(self, schedule_id: str, enabled: bool):
+        return self._schedule_ops.set_schedule_enabled(schedule_id, enabled)
+
+    def update_schedule_run_times(self, schedule_id: str, last_run_at=None, next_run_at=None):
+        return self._schedule_ops.update_schedule_run_times(schedule_id, last_run_at, next_run_at)
+
+    def delete_agent_schedules(self, agent_name: str):
+        return self._schedule_ops.delete_agent_schedules(agent_name)
+
+    # =========================================================================
+    # Schedule Execution Management (delegated to db/schedules.py)
+    # =========================================================================
+
+    def create_task_execution(
+        self,
+        agent_name: str,
+        message: str,
+        triggered_by: str = "manual",
+        source_user_id: int = None,
+        source_user_email: str = None,
+        source_agent_name: str = None,
+        source_mcp_key_id: str = None,
+        source_mcp_key_name: str = None,
+        model_used: str = None,
+    ):
+        """Create an execution record for a manual/API-triggered task (no schedule)."""
+        return self._schedule_ops.create_task_execution(
+            agent_name, message, triggered_by,
+            source_user_id=source_user_id,
+            source_user_email=source_user_email,
+            source_agent_name=source_agent_name,
+            source_mcp_key_id=source_mcp_key_id,
+            source_mcp_key_name=source_mcp_key_name,
+            model_used=model_used,
+        )
+
+    def create_schedule_execution(
+        self,
+        schedule_id: str,
+        agent_name: str,
+        message: str,
+        triggered_by: str = "schedule",
+        source_user_id: int = None,
+        source_user_email: str = None,
+        source_agent_name: str = None,
+        source_mcp_key_id: str = None,
+        source_mcp_key_name: str = None,
+    ):
+        return self._schedule_ops.create_schedule_execution(
+            schedule_id, agent_name, message, triggered_by,
+            source_user_id=source_user_id,
+            source_user_email=source_user_email,
+            source_agent_name=source_agent_name,
+            source_mcp_key_id=source_mcp_key_id,
+            source_mcp_key_name=source_mcp_key_name,
+        )
+
+    def update_execution_status(self, execution_id: str, status: str, response: str = None, error: str = None,
+                                context_used: int = None, context_max: int = None, cost: float = None, tool_calls: str = None, execution_log: str = None,
+                                claude_session_id: str = None):
+        return self._schedule_ops.update_execution_status(execution_id, status, response, error,
+                                                          context_used, context_max, cost, tool_calls, execution_log, claude_session_id)
+
+    def get_schedule_executions(self, schedule_id: str, limit: int = 50):
+        return self._schedule_ops.get_schedule_executions(schedule_id, limit)
+
+    def get_agent_executions(self, agent_name: str, limit: int = 50):
+        return self._schedule_ops.get_agent_executions(agent_name, limit)
+
+    def get_agent_executions_summary(self, agent_name: str, limit: int = 50):
+        """Get execution summaries for list view - excludes large text fields.
+
+        PERF-001: Task List Performance Optimization
+        """
+        return self._schedule_ops.get_agent_executions_summary(agent_name, limit)
+
+    def get_execution(self, execution_id: str):
+        return self._schedule_ops.get_execution(execution_id)
+
+    def get_all_agents_execution_stats(self, hours: int = 24):
+        """Get execution statistics for all agents."""
+        return self._schedule_ops.get_all_agents_execution_stats(hours)
+
+    def get_all_agents_execution_stats_dual(self):
+        """Get execution statistics for all agents with both 24h and 7d windows."""
+        return self._schedule_ops.get_all_agents_execution_stats_dual()
+
+    def get_all_agents_schedule_counts(self):
+        """Get schedule counts (total and enabled) for all agents."""
+        return self._schedule_ops.get_all_agents_schedule_counts()
+
+    # =========================================================================
+    # Git Configuration Management (delegated to db/schedules.py)
+    # =========================================================================
+
+    def create_git_config(
+        self,
+        agent_name: str,
+        github_repo: str,
+        working_branch: str,
+        instance_id: str,
+        sync_paths=None,
+        source_branch: str = "main",
+        source_mode: bool = False
+    ):
+        return self._schedule_ops.create_git_config(
+            agent_name, github_repo, working_branch, instance_id, sync_paths,
+            source_branch=source_branch, source_mode=source_mode
+        )
+
+    def get_git_config(self, agent_name: str):
+        return self._schedule_ops.get_git_config(agent_name)
+
+    def update_git_sync(self, agent_name: str, commit_sha: str):
+        return self._schedule_ops.update_git_sync(agent_name, commit_sha)
+
+    def set_git_sync_enabled(self, agent_name: str, enabled: bool):
+        return self._schedule_ops.set_git_sync_enabled(agent_name, enabled)
+
+    def delete_git_config(self, agent_name: str):
+        return self._schedule_ops.delete_git_config(agent_name)
+
+    def list_git_enabled_agents(self):
+        return self._schedule_ops.list_git_enabled_agents()
+
+    # =========================================================================
+    # Chat Session and Message Operations (delegated to db/chat.py)
+    # =========================================================================
+
+    def get_or_create_chat_session(self, agent_name: str, user_id: int, user_email: str):
+        return self._chat_ops.get_or_create_chat_session(agent_name, user_id, user_email)
+
+    def add_chat_message(self, session_id: str, agent_name: str, user_id: int, user_email: str,
+                         role: str, content: str, cost: float = None, context_used: int = None,
+                         context_max: int = None, tool_calls: str = None, execution_time_ms: int = None):
+        return self._chat_ops.add_chat_message(session_id, agent_name, user_id, user_email,
+                                               role, content, cost, context_used, context_max,
+                                               tool_calls, execution_time_ms)
+
+    def get_chat_session(self, session_id: str):
+        return self._chat_ops.get_chat_session(session_id)
+
+    def get_chat_messages(self, session_id: str, limit: int = 100):
+        return self._chat_ops.get_chat_messages(session_id, limit)
+
+    def get_agent_chat_history(self, agent_name: str, user_id: int = None, limit: int = 100):
+        return self._chat_ops.get_agent_chat_history(agent_name, user_id, limit)
+
+    def get_agent_chat_sessions(self, agent_name: str, user_id: int = None, status: str = None):
+        return self._chat_ops.get_agent_chat_sessions(agent_name, user_id, status)
+
+    def close_chat_session(self, session_id: str):
+        return self._chat_ops.close_chat_session(session_id)
+
+    def create_new_chat_session(self, agent_name: str, user_id: int, user_email: str):
+        return self._chat_ops.create_new_chat_session(agent_name, user_id, user_email)
+
+    def delete_chat_session(self, session_id: str):
+        return self._chat_ops.delete_chat_session(session_id)
+
+    # =========================================================================
+    # Activity Stream Methods (delegated to db/activities.py)
+    # =========================================================================
+
+    def create_activity(self, activity):
+        return self._activity_ops.create_activity(activity)
+
+    def complete_activity(self, activity_id: str, status: str = "completed", details: dict = None, error: str = None):
+        return self._activity_ops.complete_activity(activity_id, status, details, error)
+
+    def get_activity(self, activity_id: str):
+        return self._activity_ops.get_activity(activity_id)
+
+    def get_agent_activities(self, agent_name: str, activity_type: str = None, activity_state: str = None, limit: int = 100):
+        return self._activity_ops.get_agent_activities(agent_name, activity_type, activity_state, limit)
+
+    def get_activities_in_range(self, start_time: str = None, end_time: str = None, activity_types: list = None, limit: int = 100):
+        return self._activity_ops.get_activities_in_range(start_time, end_time, activity_types, limit)
+
+    def get_current_activities(self, agent_name: str):
+        return self._activity_ops.get_current_activities(agent_name)
+
+    # =========================================================================
+    # Agent Permissions (delegated to db/permissions.py) - Phase 9.10
+    # =========================================================================
+
+    def get_permitted_agents(self, source_agent: str):
+        return self._permission_ops.get_permitted_agents(source_agent)
+
+    def get_permission_details(self, source_agent: str):
+        return self._permission_ops.get_permission_details(source_agent)
+
+    def is_agent_permitted(self, source_agent: str, target_agent: str):
+        return self._permission_ops.is_permitted(source_agent, target_agent)
+
+    def add_agent_permission(self, source_agent: str, target_agent: str, created_by: str):
+        return self._permission_ops.add_permission(source_agent, target_agent, created_by)
+
+    def remove_agent_permission(self, source_agent: str, target_agent: str):
+        return self._permission_ops.remove_permission(source_agent, target_agent)
+
+    def set_agent_permissions(self, source_agent: str, target_agents: list, created_by: str):
+        return self._permission_ops.set_permissions(source_agent, target_agents, created_by)
+
+    def delete_agent_permissions(self, agent_name: str):
+        return self._permission_ops.delete_agent_permissions(agent_name)
+
+    def grant_default_permissions(self, agent_name: str, owner_username: str):
+        return self._permission_ops.grant_default_permissions(agent_name, owner_username)
+
+    # =========================================================================
+    # Shared Folder Configuration (delegated to db/shared_folders.py) - Phase 9.11
+    # =========================================================================
+
+    def get_shared_folder_config(self, agent_name: str):
+        return self._shared_folder_ops.get_shared_folder_config(agent_name)
+
+    def upsert_shared_folder_config(self, agent_name: str, expose_enabled=None, consume_enabled=None):
+        return self._shared_folder_ops.upsert_shared_folder_config(agent_name, expose_enabled, consume_enabled)
+
+    def delete_shared_folder_config(self, agent_name: str):
+        return self._shared_folder_ops.delete_shared_folder_config(agent_name)
+
+    def get_agents_exposing_folders(self):
+        return self._shared_folder_ops.get_agents_exposing_folders()
+
+    def get_available_shared_folders(self, requesting_agent: str):
+        return self._shared_folder_ops.get_available_shared_folders(requesting_agent)
+
+    def get_consuming_agents(self, source_agent: str):
+        return self._shared_folder_ops.get_consuming_agents(source_agent)
+
+    @staticmethod
+    def get_shared_volume_name(agent_name: str):
+        return SharedFolderOperations.get_shared_volume_name(agent_name)
+
+    @staticmethod
+    def get_shared_mount_path(source_agent: str):
+        return SharedFolderOperations.get_shared_mount_path(source_agent)
+
+    # =========================================================================
+    # System Settings (delegated to db/settings.py)
+    # =========================================================================
+
+    def get_setting(self, key: str):
+        return self._settings_ops.get_setting(key)
+
+    def get_setting_value(self, key: str, default: str = None):
+        return self._settings_ops.get_setting_value(key, default)
+
+    def set_setting(self, key: str, value: str):
+        return self._settings_ops.set_setting(key, value)
+
+    def delete_setting(self, key: str):
+        return self._settings_ops.delete_setting(key)
+
+    def get_all_settings(self):
+        return self._settings_ops.get_all_settings()
+
+    def get_settings_dict(self):
+        return self._settings_ops.get_settings_dict()
+
+    # =========================================================================
+    # Public Agent Links (delegated to db/public_links.py) - Phase 12.2
+    # =========================================================================
+
+    def create_public_link(self, agent_name: str, created_by: str, name: str = None,
+                           require_email: bool = False, expires_at: str = None):
+        return self._public_link_ops.create_public_link(agent_name, created_by, name, require_email, expires_at)
+
+    def get_public_link(self, link_id: str):
+        return self._public_link_ops.get_public_link(link_id)
+
+    def get_public_link_by_token(self, token: str):
+        return self._public_link_ops.get_public_link_by_token(token)
+
+    def list_agent_public_links(self, agent_name: str):
+        return self._public_link_ops.list_agent_public_links(agent_name)
+
+    def update_public_link(self, link_id: str, name: str = None, enabled: bool = None,
+                           require_email: bool = None, expires_at: str = None):
+        return self._public_link_ops.update_public_link(link_id, name, enabled, require_email, expires_at)
+
+    def delete_public_link(self, link_id: str):
+        return self._public_link_ops.delete_public_link(link_id)
+
+    def delete_agent_public_links(self, agent_name: str):
+        return self._public_link_ops.delete_agent_public_links(agent_name)
+
+    def is_public_link_valid(self, token: str):
+        return self._public_link_ops.is_link_valid(token)
+
+    # Email verification methods
+    def create_verification(self, link_id: str, email: str, expiry_minutes: int = 10):
+        return self._public_link_ops.create_verification(link_id, email, expiry_minutes)
+
+    def verify_code(self, link_id: str, email: str, code: str, session_hours: int = 24):
+        return self._public_link_ops.verify_code(link_id, email, code, session_hours)
+
+    def validate_session(self, link_id: str, session_token: str):
+        return self._public_link_ops.validate_session(link_id, session_token)
+
+    def count_recent_verification_requests(self, email: str, minutes: int = 10):
+        return self._public_link_ops.count_recent_verification_requests(email, minutes)
+
+    # Usage tracking methods
+    def record_public_link_usage(self, link_id: str, email: str = None, ip_address: str = None):
+        return self._public_link_ops.record_usage(link_id, email, ip_address)
+
+    def get_public_link_usage_stats(self, link_id: str):
+        return self._public_link_ops.get_link_usage_stats(link_id)
+
+    def count_recent_messages_by_ip(self, ip_address: str, minutes: int = 1):
+        return self._public_link_ops.count_recent_messages_by_ip(ip_address, minutes)
+
+    # =========================================================================
+    # Email Authentication (delegated to db/email_auth.py) - Phase 12.4
+    # =========================================================================
+
+    def is_email_whitelisted(self, email: str):
+        return self._email_auth_ops.is_email_whitelisted(email)
+
+    def add_to_whitelist(self, email: str, added_by: str, source: str = "manual"):
+        return self._email_auth_ops.add_to_whitelist(email, added_by, source)
+
+    def remove_from_whitelist(self, email: str):
+        return self._email_auth_ops.remove_from_whitelist(email)
+
+    def list_whitelist(self, limit: int = 100):
+        return self._email_auth_ops.list_whitelist(limit)
+
+    def create_login_code(self, email: str, expiry_minutes: int = 10):
+        return self._email_auth_ops.create_login_code(email, expiry_minutes)
+
+    def verify_login_code(self, email: str, code: str):
+        return self._email_auth_ops.verify_login_code(email, code)
+
+    def count_recent_code_requests(self, email: str, minutes: int = 10):
+        return self._email_auth_ops.count_recent_code_requests(email, minutes)
+
+    def cleanup_old_codes(self, days: int = 1):
+        return self._email_auth_ops.cleanup_old_codes(days)
+
+    def get_or_create_email_user(self, email: str):
+        return self._email_auth_ops.get_or_create_email_user(email)
+
+    # =========================================================================
+    # Agent Skills (delegated to db/skills.py) - Skills Management System
+    # =========================================================================
+
+    def get_agent_skills(self, agent_name: str):
+        return self._skills_ops.get_agent_skills(agent_name)
+
+    def get_agent_skill_names(self, agent_name: str):
+        return self._skills_ops.get_agent_skill_names(agent_name)
+
+    def assign_skill(self, agent_name: str, skill_name: str, assigned_by: str):
+        return self._skills_ops.assign_skill(agent_name, skill_name, assigned_by)
+
+    def unassign_skill(self, agent_name: str, skill_name: str):
+        return self._skills_ops.unassign_skill(agent_name, skill_name)
+
+    def set_agent_skills(self, agent_name: str, skill_names: list, assigned_by: str):
+        return self._skills_ops.set_agent_skills(agent_name, skill_names, assigned_by)
+
+    def delete_agent_skills(self, agent_name: str):
+        return self._skills_ops.delete_agent_skills(agent_name)
+
+    def is_skill_assigned(self, agent_name: str, skill_name: str):
+        return self._skills_ops.is_skill_assigned(agent_name, skill_name)
+
+    def get_agents_with_skill(self, skill_name: str):
+        return self._skills_ops.get_agents_with_skill(skill_name)
+
+    # =========================================================================
+    # Public Chat Sessions (delegated to db/public_chat.py) - Phase 12.2.5
+    # =========================================================================
+
+    def get_or_create_public_chat_session(self, link_id: str, session_identifier: str, identifier_type: str):
+        return self._public_chat_ops.get_or_create_session(link_id, session_identifier, identifier_type)
+
+    def get_public_chat_session_by_identifier(self, link_id: str, session_identifier: str):
+        return self._public_chat_ops.get_session_by_identifier(link_id, session_identifier)
+
+    def get_public_chat_session(self, session_id: str):
+        return self._public_chat_ops.get_session(session_id)
+
+    def add_public_chat_message(self, session_id: str, role: str, content: str, cost: float = None):
+        return self._public_chat_ops.add_message(session_id, role, content, cost)
+
+    def get_public_chat_messages(self, session_id: str, limit: int = 20):
+        return self._public_chat_ops.get_session_messages(session_id, limit)
+
+    def get_recent_public_chat_messages(self, session_id: str, limit: int = 20):
+        return self._public_chat_ops.get_recent_messages(session_id, limit)
+
+    def clear_public_chat_session(self, session_id: str):
+        return self._public_chat_ops.clear_session(session_id)
+
+    def build_public_chat_context(self, session_id: str, new_message: str, max_turns: int = 10):
+        return self._public_chat_ops.build_context_prompt(session_id, new_message, max_turns)
+
+    def delete_public_link_sessions(self, link_id: str):
+        return self._public_chat_ops.delete_link_sessions(link_id)
+
+    # =========================================================================
+    # Agent Tags (delegated to db/tags.py) - ORG-001
+    # =========================================================================
+
+    def get_agent_tags(self, agent_name: str):
+        return self._tag_ops.get_agent_tags(agent_name)
+
+    def set_agent_tags(self, agent_name: str, tags: list):
+        return self._tag_ops.set_agent_tags(agent_name, tags)
+
+    def add_agent_tag(self, agent_name: str, tag: str):
+        return self._tag_ops.add_tag(agent_name, tag)
+
+    def remove_agent_tag(self, agent_name: str, tag: str):
+        return self._tag_ops.remove_tag(agent_name, tag)
+
+    def list_all_tags(self):
+        return self._tag_ops.list_all_tags()
+
+    def get_agents_by_tag(self, tag: str):
+        return self._tag_ops.get_agents_by_tag(tag)
+
+    def get_agents_by_tags(self, tags: list):
+        return self._tag_ops.get_agents_by_tags(tags)
+
+    def delete_agent_tags(self, agent_name: str):
+        return self._tag_ops.delete_agent_tags(agent_name)
+
+    def get_tags_for_agents(self, agent_names: list):
+        return self._tag_ops.get_tags_for_agents(agent_names)
+
+    # =========================================================================
+    # System Views (delegated to db/system_views.py) - ORG-001 Phase 2
+    # =========================================================================
+
+    def create_system_view(self, owner_id: str, data):
+        return self._system_view_ops.create_view(owner_id, data)
+
+    def get_system_view(self, view_id: str):
+        return self._system_view_ops.get_view(view_id)
+
+    def list_user_system_views(self, user_id: str):
+        return self._system_view_ops.list_user_views(user_id)
+
+    def list_all_system_views(self):
+        return self._system_view_ops.list_all_views()
+
+    def update_system_view(self, view_id: str, data):
+        return self._system_view_ops.update_view(view_id, data)
+
+    def delete_system_view(self, view_id: str):
+        return self._system_view_ops.delete_view(view_id)
+
+    def can_user_view_system_view(self, user_id: str, view_id: str):
+        return self._system_view_ops.can_user_view(user_id, view_id)
+
+    def can_user_edit_system_view(self, user_id: str, view_id: str, is_admin: bool = False):
+        return self._system_view_ops.can_user_edit_view(user_id, view_id, is_admin)
+
+    # =========================================================================
+    # Agent Notifications (delegated to db/notifications.py) - NOTIF-001
+    # =========================================================================
+
+    def create_notification(self, agent_name: str, data):
+        return self._notification_ops.create_notification(agent_name, data)
+
+    def get_notification(self, notification_id: str):
+        return self._notification_ops.get_notification(notification_id)
+
+    def list_notifications(self, agent_name=None, status=None, priority=None, category=None, limit=100):
+        return self._notification_ops.list_notifications(agent_name, status, priority, category, limit)
+
+    def list_agent_notifications(self, agent_name: str, status=None, limit=50):
+        return self._notification_ops.list_agent_notifications(agent_name, status, limit)
+
+    def acknowledge_notification(self, notification_id: str, acknowledged_by: str):
+        return self._notification_ops.acknowledge_notification(notification_id, acknowledged_by)
+
+    def dismiss_notification(self, notification_id: str, dismissed_by: str):
+        return self._notification_ops.dismiss_notification(notification_id, dismissed_by)
+
+    def delete_agent_notifications(self, agent_name: str):
+        return self._notification_ops.delete_agent_notifications(agent_name)
+
+    def count_pending_notifications(self, agent_name=None):
+        return self._notification_ops.count_pending_notifications(agent_name)
+
+    # =========================================================================
+    # Subscription Credentials (delegated to db/subscriptions.py) - SUB-002
+    # =========================================================================
+
+    def create_subscription(self, name: str, token: str, owner_id: int,
+                            subscription_type: str = None, rate_limit_tier: str = None):
+        return self._subscription_ops.create_subscription(
+            name, token, owner_id, subscription_type, rate_limit_tier
+        )
+
+    def get_subscription(self, subscription_id: str):
+        return self._subscription_ops.get_subscription(subscription_id)
+
+    def get_subscription_by_name(self, name: str):
+        return self._subscription_ops.get_subscription_by_name(name)
+
+    def get_subscription_token(self, subscription_id: str):
+        return self._subscription_ops.get_subscription_token(subscription_id)
+
+    def list_subscriptions(self, owner_id: int = None):
+        return self._subscription_ops.list_subscriptions(owner_id)
+
+    def list_subscriptions_with_agents(self, owner_id: int = None):
+        return self._subscription_ops.list_subscriptions_with_agents(owner_id)
+
+    def delete_subscription(self, subscription_id: str):
+        return self._subscription_ops.delete_subscription(subscription_id)
+
+    def assign_subscription_to_agent(self, agent_name: str, subscription_id: str):
+        return self._subscription_ops.assign_subscription_to_agent(agent_name, subscription_id)
+
+    def clear_agent_subscription(self, agent_name: str):
+        return self._subscription_ops.clear_agent_subscription(agent_name)
+
+    def get_agent_subscription(self, agent_name: str):
+        return self._subscription_ops.get_agent_subscription(agent_name)
+
+    def get_agents_by_subscription(self, subscription_id: str):
+        return self._subscription_ops.get_agents_by_subscription(subscription_id)
+
+    def get_agent_subscription_id(self, agent_name: str):
+        return self._subscription_ops.get_agent_subscription_id(agent_name)
+
+    # =========================================================================
+    # Agent Monitoring (delegated to db/monitoring.py) - MON-001
+    # =========================================================================
+
+    def create_health_check(self, agent_name: str, check_type: str, status: str,
+                            docker_metrics: dict = None, network_metrics: dict = None,
+                            business_metrics: dict = None, error_message: str = None):
+        return self._monitoring_ops.create_health_check(
+            agent_name, check_type, status, docker_metrics,
+            network_metrics, business_metrics, error_message
+        )
+
+    def get_latest_health_check(self, agent_name: str, check_type: str = "aggregate"):
+        return self._monitoring_ops.get_latest_health_check(agent_name, check_type)
+
+    def get_agent_health_history(self, agent_name: str, check_type: str = "aggregate",
+                                  hours: int = 24, limit: int = 100):
+        return self._monitoring_ops.get_agent_health_history(agent_name, check_type, hours, limit)
+
+    def get_all_latest_health_checks(self, agent_names: list = None, check_type: str = "aggregate"):
+        return self._monitoring_ops.get_all_latest_health_checks(agent_names, check_type)
+
+    def get_health_summary(self, agent_names: list = None):
+        return self._monitoring_ops.get_health_summary(agent_names)
+
+    def calculate_uptime_percent(self, agent_name: str, hours: int = 24):
+        return self._monitoring_ops.calculate_uptime_percent(agent_name, hours)
+
+    def calculate_avg_latency(self, agent_name: str, hours: int = 24):
+        return self._monitoring_ops.calculate_avg_latency(agent_name, hours)
+
+    def cleanup_old_health_records(self, days: int = 7):
+        return self._monitoring_ops.cleanup_old_records(days)
+
+    def get_alert_cooldown(self, agent_name: str, condition: str):
+        return self._monitoring_ops.get_cooldown(agent_name, condition)
+
+    def set_alert_cooldown(self, agent_name: str, condition: str):
+        return self._monitoring_ops.set_cooldown(agent_name, condition)
+
+    def clear_alert_cooldown(self, agent_name: str, condition: str):
+        return self._monitoring_ops.clear_cooldown(agent_name, condition)
+
+    def is_in_alert_cooldown(self, agent_name: str, condition: str, cooldown_seconds: int):
+        return self._monitoring_ops.is_in_cooldown(agent_name, condition, cooldown_seconds)
+
+    def cleanup_alert_cooldowns(self, agent_name: str = None):
+        return self._monitoring_ops.cleanup_cooldowns(agent_name)
+
+    # =========================================================================
+    # Dashboard History (delegated to db/dashboard_history.py) - DASH-001
+    # =========================================================================
+
+    def capture_dashboard_snapshot(self, agent_name: str, config: dict, dashboard_mtime: str):
+        return self._dashboard_history_ops.capture_dashboard_snapshot(agent_name, config, dashboard_mtime)
+
+    def get_widget_history(self, agent_name: str, widget_key: str, hours: int = 24, limit: int = 100):
+        return self._dashboard_history_ops.get_widget_history(agent_name, widget_key, hours, limit)
+
+    def get_all_widget_history(self, agent_name: str, hours: int = 24):
+        return self._dashboard_history_ops.get_all_widget_history(agent_name, hours)
+
+    def calculate_widget_stats(self, values: list):
+        return self._dashboard_history_ops.calculate_widget_stats(values)
+
+    def get_last_captured_mtime(self, agent_name: str):
+        return self._dashboard_history_ops.get_last_captured_mtime(agent_name)
+
+    def cleanup_old_dashboard_snapshots(self, days: int = 30):
+        return self._dashboard_history_ops.cleanup_old_snapshots(days)
+
+    def delete_agent_dashboard_history(self, agent_name: str):
+        return self._dashboard_history_ops.delete_agent_dashboard_history(agent_name)
+
+    def get_agent_execution_stats(self, agent_name: str, hours: int = 24):
+        return self._schedule_ops.get_agent_execution_stats(agent_name, hours)
+
+    # =========================================================================
+    # Slack Integration (delegated to db/slack.py) - SLACK-001
+    # =========================================================================
+
+    def create_slack_connection(self, link_id: str, slack_team_id: str, slack_team_name: str,
+                                 slack_bot_token: str, connected_by: str):
+        return self._slack_ops.create_slack_connection(
+            link_id, slack_team_id, slack_team_name, slack_bot_token, connected_by
+        )
+
+    def get_slack_connection(self, connection_id: str):
+        return self._slack_ops.get_slack_connection(connection_id)
+
+    def get_slack_connection_by_link(self, link_id: str):
+        return self._slack_ops.get_slack_connection_by_link(link_id)
+
+    def get_slack_connection_by_team(self, slack_team_id: str):
+        return self._slack_ops.get_slack_connection_by_team(slack_team_id)
+
+    def update_slack_connection(self, connection_id: str, enabled: bool = None, slack_team_name: str = None):
+        return self._slack_ops.update_slack_connection(connection_id, enabled, slack_team_name)
+
+    def delete_slack_connection(self, connection_id: str):
+        return self._slack_ops.delete_slack_connection(connection_id)
+
+    def delete_slack_connection_by_link(self, link_id: str):
+        return self._slack_ops.delete_slack_connection_by_link(link_id)
+
+    def get_slack_user_verification(self, link_id: str, slack_user_id: str, slack_team_id: str):
+        return self._slack_ops.get_user_verification(link_id, slack_user_id, slack_team_id)
+
+    def create_slack_user_verification(self, link_id: str, slack_user_id: str, slack_team_id: str,
+                                        verified_email: str, verification_method: str):
+        return self._slack_ops.create_user_verification(
+            link_id, slack_user_id, slack_team_id, verified_email, verification_method
+        )
+
+    def get_slack_pending_verification(self, slack_user_id: str, slack_team_id: str):
+        return self._slack_ops.get_pending_verification(slack_user_id, slack_team_id)
+
+    def create_slack_pending_verification(self, link_id: str, slack_user_id: str, slack_team_id: str,
+                                           email: str = None, code: str = None, state: str = "awaiting_email"):
+        return self._slack_ops.create_pending_verification(
+            link_id, slack_user_id, slack_team_id, email, code, state
+        )
+
+    def update_slack_pending_verification(self, slack_user_id: str, slack_team_id: str,
+                                           email: str = None, code: str = None, state: str = None):
+        return self._slack_ops.update_pending_verification(slack_user_id, slack_team_id, email, code, state)
+
+    def delete_slack_pending_verification(self, slack_user_id: str, slack_team_id: str):
+        return self._slack_ops.delete_pending_verification(slack_user_id, slack_team_id)
+
+    def cleanup_expired_slack_pending_verifications(self):
+        return self._slack_ops.cleanup_expired_pending_verifications()
+
+    # =========================================================================
+    # Nevermined Payment Integration (delegated to db/nevermined.py) - NVM-001
+    # =========================================================================
+
+    def create_or_update_nevermined_config(self, agent_name, nvm_api_key, nvm_environment,
+                                            nvm_agent_id, nvm_plan_id, credits_per_request=1):
+        return self._nevermined_ops.create_or_update_config(
+            agent_name, nvm_api_key, nvm_environment, nvm_agent_id, nvm_plan_id, credits_per_request
+        )
+
+    def get_nevermined_config(self, agent_name):
+        return self._nevermined_ops.get_config(agent_name)
+
+    def get_nevermined_config_with_key(self, agent_name):
+        return self._nevermined_ops.get_config_with_key(agent_name)
+
+    def delete_nevermined_config(self, agent_name):
+        return self._nevermined_ops.delete_config(agent_name)
+
+    def set_nevermined_enabled(self, agent_name, enabled):
+        return self._nevermined_ops.set_enabled(agent_name, enabled)
+
+    def is_nevermined_enabled(self, agent_name):
+        return self._nevermined_ops.is_nevermined_enabled(agent_name)
+
+    def log_nevermined_payment(self, agent_name, action, success, **kwargs):
+        return self._nevermined_ops.log_payment(agent_name, action, success, **kwargs)
+
+    def get_nevermined_payment_log(self, agent_name, limit=50):
+        return self._nevermined_ops.get_payment_log(agent_name, limit)
+
+    def get_nevermined_settlement_failures(self, limit=50):
+        return self._nevermined_ops.get_settlement_failures(limit)
+
+    def get_nevermined_payment_log_entry(self, log_id):
+        return self._nevermined_ops.get_payment_log_entry(log_id)
+
+
+# Global database manager instance
+db = DatabaseManager()

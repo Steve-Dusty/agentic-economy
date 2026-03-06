@@ -1,0 +1,74 @@
+# T2.4 - Conditional Skip
+#
+# Purpose: Validate step-level condition that skips steps
+# Agent: process-echo
+# Expected: Steps with false conditions are skipped, not failed
+#
+# Test Validates:
+# - Step-level condition: attribute works
+# - Steps with false conditions are marked SKIPPED
+# - Skipped steps don't block downstream steps
+# - Downstream steps can reference that upstream was skipped
+
+name: t2.4-conditional-skip
+version: "1.0"
+description: "Conditional skip test - validates step-level condition evaluation"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+input:
+  run_optional:
+    type: boolean
+    description: "Whether to run optional step (use false to test skip)"
+    default: false
+
+steps:
+  - id: check-flag
+    name: Check Flag
+    type: agent_task
+    agent: process-echo
+    message: "Optional flag is: {{input.run_optional}}"
+    timeout: 120s
+
+  - id: required-step
+    name: Required Step
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - check-flag
+    message: "This step always runs"
+    timeout: 120s
+
+  - id: optional-step
+    name: Optional Step
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - check-flag
+    condition: "input.run_optional == true"
+    message: "This step only runs if run_optional is true"
+    timeout: 120s
+
+  - id: final-step
+    name: Final Step
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - required-step
+      - optional-step
+    message: "Final step - optional step status was: {{steps.optional-step.status}}"
+    timeout: 120s
+
+# Test Scenarios:
+# 1. Input run_optional=true: optional-step runs, final-step sees "completed"
+# 2. Input run_optional=false: optional-step skipped, final-step still runs
+
+# Verification Checklist:
+# [ ] required-step always runs
+# [ ] optional-step runs only when condition is true
+# [ ] optional-step is SKIPPED (not FAILED) when condition is false
+# [ ] final-step runs even if optional-step is skipped
+# [ ] final-step can reference optional-step status
+# [ ] Process completes successfully in both scenarios

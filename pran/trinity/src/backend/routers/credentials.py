@@ -1,0 +1,319 @@
+"""
+Credential management routes for the Trinity backend.
+
+CRED-002: Simplified credential system using encrypted files in git.
+The old Redis-based credential system has been removed. Credentials are now:
+1. Injected directly into agents via inject_credentials
+2. Exported to encrypted .credentials.enc files (can be committed to git)
+3. Imported from .credentials.enc files on agent startup
+"""
+import os
+from fastapi import APIRouter, Depends, HTTPException, Request
+import httpx
+
+from models import (
+    User,
+    CredentialInjectRequest,
+    CredentialInjectResponse,
+    CredentialExportResponse,
+    CredentialImportResponse,
+)
+from config import OAUTH_CONFIGS, BACKEND_URL
+from dependencies import get_current_user
+from services.docker_service import get_agent_container, get_agent_status_from_container
+
+router = APIRouter(prefix="/api", tags=["credentials"])
+
+
+# ============================================================================
+# Agent Credential Status (Simplified)
+# ============================================================================
+
+@router.get("/agents/{agent_name}/credentials/status")
+async def get_agent_credentials_status(
+    agent_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get credential status from a running agent."""
+    container = get_agent_container(agent_name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent_status = get_agent_status_from_container(container)
+    if agent_status.status != "running":
+        return {
+            "agent_name": agent_name,
+            "status": "agent_not_running",
+            "message": "Agent must be running to check credential status"
+        }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://agent-{agent_name}:8000/api/credentials/status",
+                timeout=10.0
+            )
+            response.raise_for_status()
+            return response.json()
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to agent: {str(e)}"
+        )
+
+
+# ============================================================================
+# OAuth Routes (kept for OAuth flow support)
+# ============================================================================
+
+@router.post("/oauth/{provider}/init")
+async def init_oauth(
+    provider: str,
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Initialize OAuth flow for a provider."""
+    if provider not in OAUTH_CONFIGS:
+        raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
+
+    config = OAUTH_CONFIGS[provider]
+    if not config["client_id"]:
+        raise HTTPException(
+            status_code=500,
+            detail=f"OAuth not configured for {provider}. Set {provider.upper()}_CLIENT_ID environment variable."
+        )
+
+    # OAuth state is now stored in a simple in-memory dict (ephemeral)
+    # For production, consider using Redis or database
+    import secrets
+    import json
+    state = secrets.token_urlsafe(32)
+
+    # Store state in environment-based cache (simplified)
+    # In production, use Redis or database
+    redirect_uri = f"{BACKEND_URL}/api/oauth/{provider}/callback"
+
+    # Build OAuth URL based on provider
+    oauth_urls = {
+        "google": "https://accounts.google.com/o/oauth2/v2/auth",
+        "github": "https://github.com/login/oauth/authorize",
+        "slack": "https://slack.com/oauth/v2/authorize",
+        "notion": "https://api.notion.com/v1/oauth/authorize",
+    }
+
+    scopes = {
+        "google": "openid email profile https://www.googleapis.com/auth/drive",
+        "github": "repo user",
+        "slack": "chat:write channels:read",
+        "notion": "",
+    }
+
+    auth_url = (
+        f"{oauth_urls.get(provider)}?"
+        f"client_id={config['client_id']}&"
+        f"redirect_uri={redirect_uri}&"
+        f"response_type=code&"
+        f"state={state}&"
+        f"scope={scopes.get(provider, '')}"
+    )
+
+    return {"auth_url": auth_url, "state": state}
+
+
+@router.get("/oauth/providers")
+async def list_oauth_providers():
+    """List available OAuth providers."""
+    oauth_scopes = {
+        "google": ["openid", "email", "profile", "drive"],
+        "github": ["repo", "user"],
+        "slack": ["chat:write", "channels:read"],
+        "notion": [],
+    }
+
+    providers = []
+    for provider, config in OAUTH_CONFIGS.items():
+        providers.append({
+            "name": provider,
+            "display_name": provider.title(),
+            "configured": bool(config["client_id"]),
+            "scopes": oauth_scopes.get(provider, [])
+        })
+
+    return {"providers": providers}
+
+
+# ============================================================================
+# New Credential System (CRED-002: Simplified Encrypted File Storage)
+# ============================================================================
+
+@router.post("/agents/{agent_name}/credentials/inject")
+async def inject_credentials(
+    agent_name: str,
+    request_body: CredentialInjectRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Inject credential files directly into a running agent.
+
+    This is the new simplified credential injection that writes files
+    directly to the agent's workspace without Redis or template processing.
+
+    Args:
+        agent_name: Name of the agent
+        request_body: Contains files dict mapping paths to contents
+                     e.g., {".env": "KEY=value", ".mcp.json": "{}"}
+    """
+    container = get_agent_container(agent_name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent_status = get_agent_status_from_container(container)
+    if agent_status.status != "running":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent is not running (status: {agent_status.status}). Start the agent first."
+        )
+
+    if not request_body.files:
+        raise HTTPException(status_code=400, detail="No files provided for injection")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://agent-{agent_name}:8000/api/credentials/inject",
+                json={"files": request_body.files},
+                timeout=30.0
+            )
+
+            if response.status_code != 200:
+                error_detail = response.json().get("detail", "Unknown error")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Agent rejected credential injection: {error_detail}"
+                )
+
+            agent_response = response.json()
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to agent: {str(e)}"
+        )
+
+    return CredentialInjectResponse(
+        status="success",
+        files_written=agent_response.get("files_written", list(request_body.files.keys())),
+        message=f"Injected {len(request_body.files)} credential file(s) to agent {agent_name}"
+    )
+
+
+@router.post("/agents/{agent_name}/credentials/export")
+async def export_credentials(
+    agent_name: str,
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export credentials from agent to encrypted .credentials.enc file.
+
+    Reads credential files (.env, .mcp.json, etc.) from the agent,
+    encrypts them, and writes .credentials.enc to the agent's workspace.
+    This file can be committed to git for portable credential storage.
+    """
+    from services.credential_encryption import get_credential_encryption_service
+
+    container = get_agent_container(agent_name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent_status = get_agent_status_from_container(container)
+    if agent_status.status != "running":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent is not running (status: {agent_status.status}). Start the agent first."
+        )
+
+    try:
+        encryption_service = get_credential_encryption_service()
+        encrypted_file = await encryption_service.export_to_agent(agent_name)
+
+        # Count files that were read
+        files = await encryption_service.read_agent_credential_files(agent_name)
+
+        return CredentialExportResponse(
+            status="success",
+            encrypted_file=encrypted_file,
+            files_exported=len(files)
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/agents/{agent_name}/credentials/import")
+async def import_credentials(
+    agent_name: str,
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Import credentials from encrypted .credentials.enc file to agent.
+
+    Reads .credentials.enc from the agent's workspace, decrypts it,
+    and writes the credential files (.env, .mcp.json, etc.) to the workspace.
+    """
+    from services.credential_encryption import get_credential_encryption_service
+
+    container = get_agent_container(agent_name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent_status = get_agent_status_from_container(container)
+    if agent_status.status != "running":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent is not running (status: {agent_status.status}). Start the agent first."
+        )
+
+    try:
+        encryption_service = get_credential_encryption_service()
+        files = await encryption_service.import_to_agent(agent_name)
+
+        return CredentialImportResponse(
+            status="success",
+            files_imported=list(files.keys()),
+            message=f"Imported {len(files)} credential file(s) from .credentials.enc"
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+@router.get("/credentials/encryption-key")
+async def get_encryption_key(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get the platform's credential encryption key.
+    Enables local agents to encrypt/decrypt .credentials.enc files.
+    """
+    key = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="Credential encryption key not configured"
+        )
+
+    return {
+        "key": key,
+        "algorithm": "AES-256-GCM",
+        "key_format": "hex (64 characters)",
+        "note": "Store securely. Never commit to git."
+    }

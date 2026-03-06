@@ -1,0 +1,132 @@
+name: "{{name}}"
+version: "1.0"
+description: "Customer support ticket handling with AI triage and human escalation"
+
+triggers:
+  - type: webhook
+    id: new-ticket
+    description: "Triggered when a new support ticket is created"
+  - type: manual
+    id: manual-start
+
+steps:
+  - id: analyze-ticket
+    name: Analyze Ticket
+    type: agent_task
+    agent: support-assistant
+    message: |
+      Please analyze this customer support ticket and determine:
+      1. Category (billing, technical, general, complaint)
+      2. Priority (low, medium, high, urgent)
+      3. Sentiment (positive, neutral, negative)
+      4. Suggested response
+      5. Whether human escalation is needed
+
+      Ticket Details:
+      Subject: {{input.subject}}
+      Message: {{input.message}}
+      Customer: {{input.customer_email}}
+    output_key: analysis
+
+  - id: check-escalation
+    name: Check Escalation Need
+    type: gateway
+    depends_on:
+      - analyze-ticket
+    gateway_type: exclusive
+    routes:
+      - condition: "{{steps.analyze-ticket.output.needs_escalation}} == true"
+        target: escalation-approval
+      - condition: "{{steps.analyze-ticket.output.priority}} == 'urgent'"
+        target: escalation-approval
+    default_route: send-response
+
+  - id: escalation-approval
+    name: Escalation Review
+    type: human_approval
+    depends_on:
+      - check-escalation
+    title: "Support Ticket Escalation Review"
+    description: |
+      A support ticket has been flagged for escalation.
+
+      Category: {{steps.analyze-ticket.output.category}}
+      Priority: {{steps.analyze-ticket.output.priority}}
+      Sentiment: {{steps.analyze-ticket.output.sentiment}}
+
+      Original Message:
+      {{input.message}}
+
+      AI Analysis:
+      {{steps.analyze-ticket.output.reasoning}}
+
+      Suggested Response:
+      {{steps.analyze-ticket.output.suggested_response}}
+    assignees:
+      - support-manager
+    timeout: 4h
+
+  - id: send-response
+    name: Send Response
+    type: agent_task
+    depends_on:
+      - check-escalation
+      - escalation-approval
+    agent: support-assistant
+    message: |
+      Please compose and send a professional response to the customer.
+
+      Analysis: {{steps.analyze-ticket.output}}
+      Customer Email: {{input.customer_email}}
+
+      If the ticket was escalated and approved, incorporate any feedback:
+      {{steps.escalation-approval.output.comments | default("No escalation feedback")}}
+    output_key: response_sent
+
+  - id: notify-customer
+    name: Notify Customer
+    type: notification
+    depends_on:
+      - send-response
+    channel: email
+    recipients:
+      - "{{input.customer_email}}"
+    subject: "Re: {{input.subject}}"
+    message: |
+      {{steps.send-response.output.response}}
+
+      ---
+      Ticket ID: {{execution.id}}
+      Category: {{steps.analyze-ticket.output.category}}
+
+  - id: sla-timer
+    name: SLA Warning Timer
+    type: timer
+    delay: 30m
+
+  - id: sla-warning
+    name: SLA Warning Notification
+    type: notification
+    depends_on:
+      - sla-timer
+    channel: slack
+    message: |
+      :warning: *SLA Warning - Support Ticket Approaching Breach*
+
+      A support ticket has been open for 30 minutes without resolution.
+
+      Subject: {{input.subject}}
+      Customer: {{input.customer_email}}
+      Category: {{steps.analyze-ticket.output.category}}
+      Priority: {{steps.analyze-ticket.output.priority}}
+      Ticket ID: {{execution.id}}
+
+      Please review and ensure timely resolution.
+
+outputs:
+  - name: ticket_analysis
+    source: "{{steps.analyze-ticket.output}}"
+  - name: response_status
+    source: "{{steps.send-response.output.status}}"
+  - name: escalated
+    source: "{{steps.escalation-approval.output.decision | default('not-escalated')}}"

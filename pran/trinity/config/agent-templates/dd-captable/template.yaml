@@ -1,0 +1,44 @@
+name: dd-captable
+display_name: DD Cap Table Agent
+description: Equity structure analysis, dilution assessment, and investor reputation check
+tagline: Who owns what
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+capabilities:
+  - cap-table-analysis
+  - dilution-modeling
+  - investor-research
+  - structure-review
+
+use_cases:
+  - "Analyze founder dilution"
+  - "Evaluate existing investors"
+  - "Assess equity structure"
+  - "Model future dilution"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: captables_analyzed
+    type: counter
+    label: "Cap Tables Analyzed"
+    description: "Total cap table reviews"
+
+  - name: analysis_status
+    type: status
+    label: "Status"
+    description: "Current analysis status"
+    values:
+      - value: "analyzing"
+        color: "blue"
+        label: "Analyzing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

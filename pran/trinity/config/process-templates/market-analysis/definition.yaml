@@ -1,0 +1,83 @@
+name: market-analysis
+version: 1
+description: End-to-end market analysis - research, strategic synthesis, and report delivery
+
+steps:
+  # Step 1: Scout conducts comprehensive market research
+  - id: market-research
+    name: Conduct Market Research
+    type: agent_task
+    agent: acme-scout
+    message: |
+      Conduct comprehensive market research on:
+
+      Market/Industry: {{input.market}}
+      Focus Areas: {{input.focus_areas}}
+      Geographic Scope: {{input.geography}}
+
+      Research and document:
+      1. Market size and growth projections
+      2. Key players and market share
+      3. Industry trends and drivers
+      4. Challenges and barriers
+      5. Emerging opportunities
+
+      Save research to /home/developer/shared-out/research/markets/
+    timeout: 15m
+
+  # Step 2: Sage synthesizes research into strategic analysis
+  - id: strategic-synthesis
+    name: Strategic Synthesis
+    type: agent_task
+    depends_on: market-research
+    agent: acme-sage
+    message: |
+      Synthesize the market research on {{input.market}} into strategic insights:
+
+      1. Review Scout's research findings
+      2. Apply relevant frameworks (Porter's Five Forces, PESTLE, etc.)
+      3. Identify strategic implications
+      4. Develop actionable recommendations
+      5. Prioritize opportunities by impact and feasibility
+
+      Save analysis to /home/developer/shared-out/strategy/markets/
+    timeout: 15m
+
+  # Step 3: Quality review gateway
+  - id: quality-check
+    name: Quality Review
+    type: human_approval
+    depends_on: strategic-synthesis
+    title: Review Market Analysis
+    description: |
+      Please review the market analysis:
+      1. Check research completeness and accuracy
+      2. Validate strategic recommendations
+      3. Confirm report should proceed to final production
+    timeout: 48h
+
+  # Step 4: Scribe creates the final deliverable
+  - id: create-report
+    name: Create Client Report
+    type: agent_task
+    depends_on: quality-check
+    agent: acme-scribe
+    message: |
+      Create a professional market analysis report for {{input.market}}:
+
+      1. Review research and strategy from shared folders
+      2. Structure the report with:
+         - Executive Summary
+         - Market Overview
+         - Competitive Landscape
+         - Trend Analysis
+         - Strategic Recommendations
+         - Appendices
+
+      Save to /home/developer/shared-out/deliverables/reports/
+    timeout: 20m
+
+outputs:
+  - name: report_status
+    source: "{{steps.create-report.output}}"
+    description: Final report creation status

@@ -1,0 +1,38 @@
+# Notification Test Process
+# Tests: Notification step type, template substitution
+
+name: notification-test
+version: 1
+description: Test process for notification step
+
+steps:
+  - id: notify-start
+    name: Send Start Notification
+    type: notification
+    channel: slack
+    message: |
+      :rocket: *Process Started*
+      Process `{{input.task_name}}` has been initiated.
+      Requested by: {{input.user}}
+    # webhook_url can be set here or use SLACK_WEBHOOK_URL env var
+    # webhook_url: "${SLACK_WEBHOOK_URL}"
+
+  - id: mock-work
+    name: Do Some Work
+    type: agent_task
+    agent: test-agent
+    message: "Processing task: {{input.task_name}}"
+    depends_on: [notify-start]
+
+  - id: notify-complete
+    name: Send Completion Notification
+    type: notification
+    channel: slack
+    message: |
+      :white_check_mark: *Process Completed*
+      Task `{{input.task_name}}` finished successfully.
+    depends_on: [mock-work]
+
+outputs:
+  - name: notifications_sent
+    source: "{{steps.notify-complete.output}}"

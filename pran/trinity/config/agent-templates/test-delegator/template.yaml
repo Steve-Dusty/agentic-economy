@@ -1,0 +1,13 @@
+name: Test Delegator Agent
+display_name: Test Delegator
+description: Delegator agent for testing agent-to-agent communication (Pillar II)
+version: "1.0.0"
+author: Trinity Platform
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+mcp_servers: []
+
+credentials: {}

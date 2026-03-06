@@ -1,0 +1,52 @@
+# T3.4 - Human Approval with Artifacts
+# 
+# Purpose: Validate approval with file artifacts for review
+# Agent: process-worker, process-echo
+# Expected: Approver can see referenced outputs in description
+#
+# Test Validates:
+# - Artifacts can be referenced in approval description
+# - Step outputs accessible in description
+# - Approval works with complex context
+
+name: t3.4-approval-artifacts
+version: "1.0"
+description: "Human approval with artifacts test - validates context in description"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: generate-report
+    name: Generate Report
+    type: agent_task
+    agent: process-worker
+    message: "Generate a detailed report with findings"
+    timeout: 120s
+
+  - id: review-with-artifacts
+    name: Review with Artifacts
+    type: human_approval
+    depends_on:
+      - generate-report
+    title: "Report Review"
+    description: "Please review the generated report and approve if satisfactory."
+    timeout: 5m
+    assignees:
+      - "reviewer@example.com"
+
+  - id: finalize
+    name: Finalize
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - review-with-artifacts
+    message: "Report finalized with approval"
+    timeout: 120s
+
+# Verification Checklist:
+# [ ] generate-report produces output
+# [ ] Approval description shows report context
+# [ ] Approval submission works
+# [ ] Process completes

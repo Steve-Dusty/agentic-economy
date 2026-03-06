@@ -1,0 +1,44 @@
+name: dd-legal
+display_name: DD Legal Agent
+description: Corporate structure review, IP ownership verification, and contract analysis
+tagline: Dotting i's and crossing t's
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "2"
+  memory: "4g"
+
+capabilities:
+  - corporate-structure
+  - ip-ownership
+  - contract-review
+  - litigation-check
+
+use_cases:
+  - "Review corporate structure"
+  - "Verify IP ownership"
+  - "Assess investor restrictions"
+  - "Check litigation risks"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: legal_reviews
+    type: counter
+    label: "Legal Reviews"
+    description: "Total legal assessments"
+
+  - name: analysis_status
+    type: status
+    label: "Status"
+    description: "Current analysis status"
+    values:
+      - value: "analyzing"
+        color: "blue"
+        label: "Analyzing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

@@ -1,0 +1,44 @@
+name: dd-market
+display_name: DD Market Agent
+description: TAM/SAM/SOM validation, growth rate verification, market headwinds and tailwinds
+tagline: Sizing the opportunity
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "2"
+  memory: "4g"
+
+capabilities:
+  - market-research
+  - tam-validation
+  - trend-analysis
+  - growth-forecasting
+
+use_cases:
+  - "Validate market size claims"
+  - "Verify growth rate projections"
+  - "Identify market headwinds and tailwinds"
+  - "Assess market timing"
+
+shared_folders:
+  expose: true
+  consume: true
+
+metrics:
+  - name: markets_analyzed
+    type: counter
+    label: "Markets Analyzed"
+    description: "Total markets researched"
+
+  - name: research_status
+    type: status
+    label: "Status"
+    description: "Current research status"
+    values:
+      - value: "researching"
+        color: "blue"
+        label: "Researching"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"

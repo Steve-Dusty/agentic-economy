@@ -1,0 +1,89 @@
+# T2.1 - Exclusive Gateway (XOR)
+#
+# Purpose: Validate exclusive gateway routing - first matching route wins
+# Agent: process-echo
+# Expected: Only one route is taken based on condition evaluation
+#
+# Test Validates:
+# - Gateway step type works
+# - Exclusive (XOR) semantics: first match wins
+# - Condition expressions evaluate correctly
+# - Non-matching routes are skipped via step condition
+
+name: t2.1-exclusive-gateway
+version: "1.0"
+description: "Exclusive gateway test - validates XOR routing based on conditions"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+input:
+  score_value:
+    type: number
+    description: "Score to determine route (use 90 for high, 60 for medium, 30 for low)"
+    default: 90
+
+steps:
+  - id: evaluate
+    name: Evaluate Score
+    type: agent_task
+    agent: process-echo
+    message: "Return this exact JSON: {\"score\": {{input.score_value}}}"
+    timeout: 120s
+
+  - id: route-decision
+    name: Route Decision
+    type: gateway
+    gateway_type: exclusive
+    depends_on:
+      - evaluate
+    default_route: low-path
+    routes:
+      - condition: "{{steps.evaluate.output.score}} >= 80"
+        target: high-path
+      - condition: "{{steps.evaluate.output.score}} >= 50"
+        target: medium-path
+
+  - id: high-path
+    name: High Score Path
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - route-decision
+    condition: "steps.route-decision.output.route == 'high-path'"
+    message: "Processing HIGH score"
+    timeout: 120s
+
+  - id: medium-path
+    name: Medium Score Path
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - route-decision
+    condition: "steps.route-decision.output.route == 'medium-path'"
+    message: "Processing MEDIUM score"
+    timeout: 120s
+
+  - id: low-path
+    name: Low Score Path
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - route-decision
+    condition: "steps.route-decision.output.route == 'low-path'"
+    message: "Processing LOW score"
+    timeout: 120s
+
+# Test Scenarios:
+# 1. Input score_value=90: Should take high-path (>=80)
+# 2. Input score_value=60: Should take medium-path (>=50 but <80)
+# 3. Input score_value=30: Should take low-path (default)
+
+# Verification Checklist:
+# [ ] evaluate step returns score in output
+# [ ] Gateway evaluates conditions in order
+# [ ] Only ONE path is taken
+# [ ] Other paths are SKIPPED
+# [ ] Correct path executes based on input
+# [ ] Process completes successfully

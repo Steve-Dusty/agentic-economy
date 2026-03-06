@@ -1,0 +1,112 @@
+"""
+Configuration constants for the Trinity backend.
+"""
+import os
+
+# Email Authentication Mode (Phase 12.4)
+# Set EMAIL_AUTH_ENABLED=true to enable email-based login with verification codes
+# This is the default authentication method. Users enter email → receive code → login
+# Can also be set via system_settings table (key: "email_auth_enabled", value: "true"/"false")
+EMAIL_AUTH_ENABLED = os.getenv("EMAIL_AUTH_ENABLED", "true").lower() == "true"
+
+# JWT Settings
+# SECURITY: SECRET_KEY must be set via environment variable in production
+# Generate with: openssl rand -hex 32
+_secret_key = os.getenv("SECRET_KEY", "")
+if not _secret_key:
+    import secrets
+    _secret_key = secrets.token_hex(32)
+    print("WARNING: SECRET_KEY not set - generated random key for this session")
+    print("         For production, set SECRET_KEY environment variable")
+elif _secret_key == "your-secret-key-change-in-production":
+    print("CRITICAL: Default SECRET_KEY detected - change immediately for production!")
+    print("         Generate with: openssl rand -hex 32")
+SECRET_KEY = _secret_key
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days (was 30 minutes)
+
+# Redis URL - supports password via REDIS_PASSWORD env var or in URL
+_redis_password = os.getenv("REDIS_PASSWORD", "")
+_redis_base_url = os.getenv("REDIS_URL", "redis://redis:6379")
+if _redis_password and "://@" not in _redis_base_url and "://:" not in _redis_base_url:
+    # Insert password into URL if not already present
+    if "://" in _redis_base_url:
+        scheme, rest = _redis_base_url.split("://", 1)
+        REDIS_URL = f"{scheme}//:{_redis_password}@{rest}"
+    else:
+        REDIS_URL = _redis_base_url
+else:
+    REDIS_URL = _redis_base_url
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost")  # Port 80 default (Docker)
+
+# External URL for public chat links (Tailscale Funnel, Cloudflare Tunnel, etc.)
+# When set, enables "Copy External Link" button in PublicLinksPanel
+PUBLIC_CHAT_URL = os.getenv("PUBLIC_CHAT_URL", "")
+
+# Email Service Configuration (for public link verification)
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend")  # "console", "smtp", "sendgrid", "resend"
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "noreply@trinity.example.com")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+
+# Slack Integration Configuration (SLACK-001)
+# Required only if Slack integration is enabled on any public link
+SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
+SLACK_AUTO_VERIFY_EMAIL = os.getenv("SLACK_AUTO_VERIFY_EMAIL", "true").lower() == "true"
+
+# GitHub PAT for template cloning (auto-uploaded to Redis on startup)
+GITHUB_PAT = os.getenv("GITHUB_PAT", "")
+GITHUB_PAT_CREDENTIAL_ID = "github-pat-templates"  # Fixed ID for consistent reference
+
+# OAuth Provider Configs
+OAUTH_CONFIGS = {
+    "google": {
+        "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+    },
+    "slack": {
+        "client_id": os.getenv("SLACK_CLIENT_ID", ""),
+        "client_secret": os.getenv("SLACK_CLIENT_SECRET", ""),
+    },
+    "github": {
+        "client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+        "client_secret": os.getenv("GITHUB_CLIENT_SECRET", ""),
+    },
+    "notion": {
+        "client_id": os.getenv("NOTION_CLIENT_ID", ""),
+        "client_secret": os.getenv("NOTION_CLIENT_SECRET", ""),
+    }
+}
+
+# CORS Origins
+# Add your production domains to EXTRA_CORS_ORIGINS environment variable (comma-separated)
+_extra_origins = os.getenv("EXTRA_CORS_ORIGINS", "").split(",")
+_extra_origins = [o.strip() for o in _extra_origins if o.strip()]
+
+# Automatically add PUBLIC_CHAT_URL to CORS if set
+if PUBLIC_CHAT_URL:
+    _extra_origins.append(PUBLIC_CHAT_URL)
+
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+] + _extra_origins
+
+# Default GitHub Template Repositories
+# Just repo identifiers — metadata is fetched from each repo's template.yaml at runtime.
+# Admins can override this list via Settings → GitHub Templates (stored in system_settings).
+DEFAULT_GITHUB_TEMPLATE_REPOS = [
+    "abilityai/agent-ruby",
+    "abilityai/agent-cornelius",
+    "abilityai/agent-corbin",
+    "abilityai/ruby-orchestrator",
+    "abilityai/ruby-content",
+    "abilityai/ruby-engagement",
+]

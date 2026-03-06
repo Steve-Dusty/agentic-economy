@@ -1,0 +1,21 @@
+name: nevermined-purchaser
+display_name: Nevermined Purchaser
+description: Agent that calls paid AI agents via Nevermined x402 payment protocol
+version: 1.0.0
+author: eugene
+
+resources:
+  cpu: "1"
+  memory: 2g
+
+capabilities:
+  - nevermined-payments
+  - http-requests
+
+commands:
+  call:
+    description: Call a paid agent endpoint
+    usage: "call <url> <message>"
+  balance:
+    description: Check remaining credit balance
+    usage: "balance"

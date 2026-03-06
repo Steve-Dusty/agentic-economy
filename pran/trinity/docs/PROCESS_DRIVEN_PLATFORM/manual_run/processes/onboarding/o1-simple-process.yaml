@@ -1,0 +1,21 @@
+# O1: Simple Process for Onboarding Testing
+# Purpose: Minimal process to test checklist auto-completion
+# Expected: Creates quickly, executes quickly, completes successfully
+
+name: onboarding-test-simple
+version: "1.0"
+description: A simple process for testing the onboarding flow
+
+triggers:
+  - type: manual
+    id: manual-start
+
+steps:
+  - id: echo-step
+    name: Echo Test Message
+    type: agent_task
+    agent: test-echo  # Use process-echo agent if available, or any running agent
+    message: |
+      Please respond with a simple confirmation message.
+      Say: "Onboarding test completed successfully!"
+    timeout: 5m

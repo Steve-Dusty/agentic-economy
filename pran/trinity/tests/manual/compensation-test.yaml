@@ -1,0 +1,35 @@
+# Compensation Test Process
+# This process will intentionally fail to demonstrate compensation handlers
+#
+# Flow:
+# 1. notify-start (notification) ✅ - will succeed (uses httpbin.org)
+# 2. do-work (agent_task) ❌ - will FAIL (agent doesn't exist)
+# 3. Compensation for notify-start runs automatically
+
+name: compensation-test
+version: 1
+description: Test compensation handlers - will fail intentionally
+
+steps:
+  - id: notify-start
+    name: Send Start Notification
+    type: notification
+    channel: webhook
+    message: "Process started! Order ID: {{input.order_id}}"
+    url: "https://httpbin.org/post"
+    compensation:
+      type: notification
+      channel: webhook
+      message: "ROLLBACK: Cancelling order {{input.order_id}} due to failure"
+      webhook_url: "https://httpbin.org/post"
+
+  - id: do-work
+    name: Process Order (will fail)
+    type: agent_task
+    agent: nonexistent-agent
+    message: "Process order {{input.order_id}}"
+    depends_on: [notify-start]
+
+outputs:
+  - name: result
+    source: "{{steps.do-work.output}}"

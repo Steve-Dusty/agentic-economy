@@ -27,3 +27,16 @@ Thumbs.db
 # Claude
 .claude/
 .mcp.json
+
+# Secrets & API keys
+*.pem
+*.key
+credentials.json
+settings.local.json
+
+# Poetry
+poetry.lock
+
+# Build
+build/
+*.egg-info/

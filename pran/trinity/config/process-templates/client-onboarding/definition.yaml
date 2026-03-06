@@ -1,0 +1,87 @@
+name: client-onboarding
+version: 1
+description: End-to-end client onboarding - from intake research to proposal delivery
+
+steps:
+  # Step 1: Scout researches the client's industry and company
+  - id: client-research
+    name: Research Client & Industry
+    type: agent_task
+    agent: acme-scout
+    message: |
+      Research the following new client prospect:
+
+      Company: {{input.company_name}}
+      Industry: {{input.industry}}
+      Contact: {{input.contact_name}}
+
+      Please research:
+      1. Company background and recent news
+      2. Industry trends and challenges
+      3. Competitive landscape
+      4. Potential opportunities for consulting engagement
+
+      Save findings to /home/developer/shared-out/research/clients/
+    timeout: 10m
+
+  # Step 2: Sage develops strategic recommendations
+  - id: strategy-development
+    name: Develop Strategic Approach
+    type: agent_task
+    depends_on: client-research
+    agent: acme-sage
+    message: |
+      Based on Scout's research on {{input.company_name}}, develop a strategic approach:
+
+      1. Review the research findings in shared-in folder
+      2. Identify 3-5 key strategic opportunities
+      3. Recommend engagement approach and scope
+      4. Outline potential value proposition
+
+      Save strategy to /home/developer/shared-out/strategy/clients/
+    timeout: 10m
+
+  # Step 3: Human review of strategy before proposal
+  - id: strategy-approval
+    name: Review Strategy
+    type: human_approval
+    depends_on: strategy-development
+    title: Approve Strategy for Client
+    description: |
+      Please review the strategic approach developed for the client.
+      Check the strategy documents and confirm the approach before we create the proposal.
+    timeout: 24h
+
+  # Step 4: Scribe creates the proposal
+  - id: create-proposal
+    name: Draft Client Proposal
+    type: agent_task
+    depends_on: strategy-approval
+    agent: acme-scribe
+    message: |
+      Create a professional proposal for {{input.company_name}}:
+
+      1. Review Scout's research and Sage's strategy
+      2. Draft a compelling proposal including:
+         - Executive summary
+         - Understanding of client needs
+         - Proposed approach and methodology
+         - Deliverables and timeline
+         - Investment and terms
+
+      Save to /home/developer/shared-out/deliverables/proposals/
+    timeout: 15m
+
+  # Step 5: Notify team of completion
+  - id: notify-completion
+    name: Notify Team
+    type: notification
+    depends_on: create-proposal
+    channel: webhook
+    message: |
+      Client onboarding complete! Proposal is ready for review.
+
+outputs:
+  - name: status
+    source: "{{steps.create-proposal.output}}"
+    description: Final proposal creation status

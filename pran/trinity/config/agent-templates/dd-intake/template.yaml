@@ -1,0 +1,46 @@
+name: dd-intake
+display_name: DD Intake Agent
+description: Parse pitch decks and extract structured data for due diligence specialists
+tagline: The front door to due diligence
+version: "1.0.0"
+author: Trinity VC Demo
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+capabilities:
+  - document-parsing
+  - data-extraction
+  - structured-output
+
+use_cases:
+  - "Parse PDF/PPTX pitch decks"
+  - "Extract founder, market, and financial data"
+  - "Identify missing critical information"
+  - "Prepare research briefs for specialists"
+
+shared_folders:
+  expose: true
+  consume: false
+
+metrics:
+  - name: decks_processed
+    type: counter
+    label: "Decks Processed"
+    description: "Total pitch decks processed"
+
+  - name: extraction_status
+    type: status
+    label: "Status"
+    description: "Current processing status"
+    values:
+      - value: "processing"
+        color: "blue"
+        label: "Processing"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"
+      - value: "error"
+        color: "red"
+        label: "Error"

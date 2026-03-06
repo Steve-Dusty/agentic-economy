@@ -1,0 +1,24 @@
+# Ignore local development files
+.env.local
+.env.*.local
+
+# Ignore node_modules (will npm install in container)
+node_modules
+
+# Ignore build artifacts
+dist
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Ignore test files
+*.test.js
+*.spec.js
+__tests__

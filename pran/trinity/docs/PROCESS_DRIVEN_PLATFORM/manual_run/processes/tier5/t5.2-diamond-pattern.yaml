@@ -1,0 +1,82 @@
+# T5.2 - Diamond Pattern
+# 
+# Purpose: Validate complex dependency graph with diamond shape
+# Agent: process-echo, process-worker
+# Expected: Fork at top, merge in middle, fork again, final merge
+
+name: t5.2-diamond-pattern
+version: "1.0"
+description: "Diamond pattern test - validates complex dependency resolution"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+#      ┌──> B1 ──┐
+# A ──┤          ├──> C ──┤          ├──> E
+#      └──> B2 ──┘       └──> D1 ──┘
+#                        └──> D2 ──┘
+
+steps:
+  - id: start
+    name: Start (A)
+    type: agent_task
+    agent: process-echo
+    message: "Return JSON: {\"status\": \"diamond-start\"}"
+    timeout: 120s
+
+  - id: branch-b1
+    name: Branch B1
+    type: agent_task
+    agent: process-echo
+    depends_on: [start]
+    message: "Return JSON: {\"status\": \"b1-done\"}"
+    timeout: 120s
+
+  - id: branch-b2
+    name: Branch B2
+    type: agent_task
+    agent: process-worker
+    depends_on: [start]
+    message: "Return JSON: {\"status\": \"b2-done\"}"
+    timeout: 120s
+
+  - id: merge-c
+    name: Merge C
+    type: agent_task
+    agent: process-echo
+    depends_on: [branch-b1, branch-b2]
+    message: "Merged B1 and B2 - return JSON: {\"status\": \"merge-c-done\"}"
+    timeout: 120s
+
+  - id: branch-d1
+    name: Branch D1
+    type: agent_task
+    agent: process-echo
+    depends_on: [merge-c]
+    message: "Return JSON: {\"status\": \"d1-done\"}"
+    timeout: 120s
+
+  - id: branch-d2
+    name: Branch D2
+    type: agent_task
+    agent: process-echo
+    depends_on: [merge-c]
+    message: "Return JSON: {\"status\": \"d2-done\"}"
+    timeout: 120s
+
+  - id: final-e
+    name: Final E
+    type: agent_task
+    agent: process-echo
+    depends_on: [branch-d1, branch-d2]
+    message: "Final merge complete - return JSON: {\"status\": \"final-done\"}"
+    timeout: 120s
+
+# Verification Checklist:
+# [ ] start (A) completes first
+# [ ] branch-b1 and branch-b2 run in parallel
+# [ ] merge-c waits for both B branches
+# [ ] branch-d1 and branch-d2 run in parallel after merge-c
+# [ ] final-e waits for both D branches
+# [ ] Execution status: COMPLETED

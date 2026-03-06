@@ -1,0 +1,88 @@
+# T2.3 - Parallel Execution (Fork/Join)
+#
+# Purpose: Validate parallel step execution and join synchronization
+# Agent: process-echo, process-worker
+# Expected: Steps without dependencies run in parallel, join waits for all
+#
+# Test Validates:
+# - Steps without mutual dependencies run concurrently
+# - Fork pattern: one step triggers multiple parallel steps
+# - Join pattern: downstream step waits for all upstream steps
+# - Parallel outputs are all available at join
+
+name: t2.3-parallel-execution
+version: "1.0"
+description: "Parallel execution test - validates fork/join pattern"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: start
+    name: Start
+    type: agent_task
+    agent: process-echo
+    message: "Return this JSON: {\"status\": \"started\"}"
+    timeout: 120s
+
+  # These three steps have no dependencies on each other - they should run in parallel
+  - id: branch-a
+    name: Branch A
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - start
+    message: "Return this JSON: {\"status\": \"branch-a-done\"}"
+    timeout: 120s
+
+  - id: branch-b
+    name: Branch B
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - start
+    message: "Return this JSON: {\"status\": \"branch-b-done\"}"
+    timeout: 120s
+
+  - id: branch-c
+    name: Branch C
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - start
+    message: "Return this JSON: {\"status\": \"branch-c-done\"}"
+    timeout: 120s
+
+  # This step depends on ALL branches - join point
+  - id: merge
+    name: Merge Results
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - branch-a
+      - branch-b
+      - branch-c
+    message: |
+      Merged results:
+      - A: {{steps.branch-a.output.status}}
+      - B: {{steps.branch-b.output.status}}
+      - C: {{steps.branch-c.output.status}}
+    timeout: 120s
+
+# Expected Flow:
+# start -> [branch-a, branch-b, branch-c] (parallel) -> merge
+#
+# Timeline should show:
+# 1. start completes
+# 2. branch-a, branch-b, branch-c all START at roughly the same time
+# 3. They complete in any order
+# 4. merge starts only after ALL three branches complete
+
+# Verification Checklist:
+# [ ] start completes first
+# [ ] branch-a, branch-b, branch-c start concurrently (check timestamps)
+# [ ] merge waits for ALL branches
+# [ ] merge receives output from all branches
+# [ ] Total execution time < sum of all step times (proves parallelism)
+# [ ] Process completes successfully

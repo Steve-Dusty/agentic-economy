@@ -1,0 +1,42 @@
+# T5.3 - Deeply Nested Expressions
+# 
+# Purpose: Test expression evaluator with complex nested paths
+# Agent: process-echo, process-worker
+# Expected: Deep path references work correctly
+
+name: t5.3-nested-expressions
+version: "1.0"
+description: "Nested expressions test - validates deep path evaluation"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: generate-deep
+    name: Generate Deep Structure
+    type: agent_task
+    agent: process-echo
+    message: "Return this exact JSON: {\"level1\": {\"level2\": {\"level3\": {\"value\": \"deep-value\", \"array\": [1,2,3]}}}}"
+    timeout: 120s
+
+  - id: generate-worker-data
+    name: Generate Worker Data
+    type: agent_task
+    agent: process-worker
+    message: "Generate a detailed analysis report with quality_score and confidence"
+    timeout: 120s
+
+  - id: access-nested
+    name: Access Nested Values
+    type: agent_task
+    agent: process-echo
+    depends_on: [generate-deep, generate-worker-data]
+    message: "Confirm both steps completed"
+    timeout: 120s
+
+# Verification Checklist:
+# [ ] generate-deep returns nested structure
+# [ ] generate-worker-data returns worker output
+# [ ] access-nested completes
+# [ ] All steps complete successfully

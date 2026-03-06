@@ -1,0 +1,1465 @@
+# Trinity Compatible Agent Guide
+
+> **Comprehensive guide** for creating and deploying Trinity-compatible agents.
+>
+> This document covers template structure, inter-agent collaboration, and best practices.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [The Four Pillars of Deep Agency](#the-four-pillars-of-deep-agency)
+3. [Required Files](#required-files)
+4. [Directory Structure](#directory-structure)
+5. [template.yaml Schema](#templateyaml-schema)
+6. [CLAUDE.md Requirements](#claudemd-requirements)
+7. [Runtime Options](#runtime-options)
+8. [Credential Management](#credential-management)
+9. [Inter-Agent Collaboration](#inter-agent-collaboration)
+10. [Shared Folders](#shared-folders)
+11. [Platform Skills](#platform-skills)
+12. [Custom Metrics](#custom-metrics)
+13. [Agent Dashboard](#agent-dashboard)
+14. [Memory Management](#memory-management)
+15. [Content Folder Convention](#content-folder-convention)
+16. [Package Persistence](#package-persistence)
+17. [Compatibility Checklist](#compatibility-checklist)
+18. [Migration Guide](#migration-guide)
+19. [Best Practices](#best-practices)
+20. [Autonomous Agent Design](#autonomous-agent-design)
+
+---
+
+## Overview
+
+Trinity deploys agents from GitHub repositories or local directories. The platform reads template metadata, extracts credential requirements, injects secrets and platform capabilities at runtime, and starts the agent container.
+
+**What makes an agent "Trinity-compatible"?**
+
+- Follows the required file structure (`template.yaml`, `CLAUDE.md`, etc.)
+- Uses placeholder syntax for credentials (`${VAR}` in `.mcp.json.template`)
+- Keeps domain-specific logic in agent, lets platform handle orchestration
+- Never commits secrets to the repository
+
+---
+
+## The Four Pillars of Deep Agency
+
+Trinity implements infrastructure for **System 2 AI** — Deep Agents that plan, reason, and execute autonomously.
+
+| Pillar | Description | Agent Responsibility | Platform Responsibility |
+|--------|-------------|---------------------|------------------------|
+| **I. Explicit Planning** | Scheduling and activity tracking | Respond to scheduled triggers | Cron scheduling, activity timeline |
+| **II. Hierarchical Delegation** | Orchestrator-Worker with context quarantine | Call other agents via MCP | Route messages, enforce access control |
+| **III. Persistent Memory** | Virtual filesystems, memory management | Manage own memory files | GitHub sync, file browser, storage |
+| **IV. Extreme Context Engineering** | High-Order Prompts defining reasoning | Domain-specific CLAUDE.md | Credential injection, MCP config |
+
+**Key Insight**: Agents focus on **domain expertise**. Trinity handles **orchestration infrastructure**.
+
+---
+
+## Required Files
+
+### 1. `template.yaml` (Required)
+
+Metadata file that Trinity reads to understand your agent.
+
+```yaml
+# Required fields
+name: my-agent                    # Unique identifier (lowercase, hyphens ok)
+display_name: "My Agent"          # Human-readable name for UI
+description: "What this agent does"
+
+# Resource limits (required)
+resources:
+  cpu: "2"                        # CPU cores (string)
+  memory: "4g"                    # Memory limit (e.g., "2g", "4g", "8g")
+```
+
+See [template.yaml Schema](#templateyaml-schema) for complete field reference.
+
+### 2. `CLAUDE.md` (Required)
+
+Agent instructions that Claude Code reads. This is your agent's "brain" - it defines behavior, workflows, available tools, and constraints.
+
+```markdown
+# Agent Name
+
+## Purpose
+What this agent does...
+
+## Available Tools
+- Tool 1: description
+- Tool 2: description
+
+## Workflows
+How the agent should approach tasks...
+
+## Constraints
+What the agent should NOT do...
+```
+
+See [CLAUDE.md Requirements](#claudemd-requirements) for guidelines.
+
+### 3. `.mcp.json.template` (Required if using MCP servers)
+
+MCP server configuration with credential placeholders. Trinity replaces `${VAR}` with actual values from the credential store.
+
+```json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "npx",
+      "args": ["-y", "@org/mcp-server"],
+      "env": {
+        "API_KEY": "${API_KEY}",
+        "API_SECRET": "${API_SECRET}"
+      }
+    }
+  }
+}
+```
+
+**Important:**
+- Use `${VAR_NAME}` syntax for credential placeholders
+- Never commit actual secrets
+- Server names must match `credentials.mcp_servers` keys in `template.yaml`
+
+### 4. `.env.example` (Recommended)
+
+Documents all required environment variables. Helps users understand what credentials are needed.
+
+```bash
+# MCP Server Credentials
+API_KEY=your-api-key-here
+API_SECRET=your-api-secret-here
+
+# Script/Tool Credentials
+OTHER_VAR=value
+```
+
+### 5. `.gitignore` (Required)
+
+Must exclude secrets, instance-specific files, and large content:
+
+```gitignore
+# Credentials - NEVER COMMIT
+.mcp.json
+.env
+*.pem
+*.key
+credentials.json
+
+# Large generated content - DO NOT COMMIT
+content/
+
+# Instance-specific directories - DO NOT COMMIT
+.npm/
+.ssh/
+.trinity/
+.cache/
+
+# Instance-specific files - DO NOT COMMIT
+.claude.json
+.claude.json.backup
+.sudo_as_admin_successful
+
+# Claude Code - commit commands/skills/agents, exclude runtime data
+.claude/projects/
+.claude/statsig/
+.claude/todos/
+.claude/debug/
+# Keep: .claude/commands/, .claude/skills/, .claude/agents/, settings.local.json
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+
+# Local overrides
+*.local.md
+*.local.json
+!.env.example
+!.mcp.json.template
+```
+
+**What to commit from `.claude/`:**
+- ✅ `.claude/commands/` - Slash commands
+- ✅ `.claude/skills/` - Skills (seeded to platform library on first deploy)
+- ✅ `.claude/agents/` - Sub-agents
+- ✅ `.claude/settings.local.json` - Claude Code settings
+
+**What NOT to commit from `.claude/`:**
+- ❌ `.claude/projects/` - Session data
+- ❌ `.claude/statsig/` - Analytics
+- ❌ `.claude/todos/` - Temporary todo lists
+- ❌ `.claude/debug/` - Debug logs
+
+**Note on Skills**: Skills in templates are seeded to the **Platform Skills Library** on first deployment, then managed centrally. See [Platform Skills](#platform-skills).
+
+---
+
+## Directory Structure
+
+Every Trinity-compatible agent follows this structure:
+
+```
+my-agent/
+├── .git/
+├── .gitignore                     # CRITICAL: excludes secrets
+│
+├── CLAUDE.md                      # Agent instructions
+├── README.md                      # Human documentation
+├── template.yaml                  # Trinity metadata + credential schema
+│
+├── .claude/
+│   ├── agents/                    # Agent's own sub-agents (optional)
+│   ├── commands/                  # Slash commands (optional)
+│   ├── skills/                    # Symlinks to assigned platform skills (auto-managed)
+│   ├── skills-library/            # Read-only mount of all platform skills
+│   └── settings.local.json        # Claude Code settings
+│
+├── .mcp.json.template             # MCP config with ${VAR} placeholders
+├── .env.example                   # Documents required credentials
+│
+├── docs/                          # Agent documentation (recommended)
+│   └── ...
+│
+├── outputs/                       # Generated content (COMMITTED)
+│   ├── reports/
+│   └── data/
+│
+├── content/                       # Large generated assets (NOT COMMITTED)
+│   ├── videos/                    # Generated video files
+│   ├── audio/                     # Generated audio files
+│   ├── images/                    # Generated images
+│   └── exports/                   # Data exports, large files
+│
+├── scripts/                       # Helper scripts (optional)
+└── resources/                     # Static resources (optional)
+```
+
+---
+
+## template.yaml Schema
+
+Complete schema with all available fields:
+
+```yaml
+# === REQUIRED FIELDS ===
+name: my-agent                    # Unique identifier (lowercase, hyphens ok)
+display_name: "My Agent"          # Human-readable name for UI
+description: |
+  Multi-line description of what this agent does.
+
+# Resource limits (required)
+resources:
+  cpu: "2"                        # CPU cores (string)
+  memory: "4g"                    # Memory limit (e.g., "2g", "4g", "8g")
+
+# === RUNTIME CONFIGURATION (Optional) ===
+# Defaults to Claude Code if not specified
+runtime:
+  type: claude-code               # "claude-code" or "gemini-cli"
+  model: sonnet                   # Optional model override (e.g., "gemini-2.5-pro")
+
+# === CREDENTIAL SCHEMA ===
+# Trinity uses this to inject secrets
+credentials:
+  # MCP server credentials - extracted from .mcp.json.template
+  mcp_servers:
+    server-name:                  # Must match server name in .mcp.json.template
+      env_vars:
+        - API_KEY
+        - API_SECRET
+
+  # Environment variables for scripts/tools
+  env_file:
+    - OTHER_VAR
+    - ANOTHER_VAR
+
+# === OPTIONAL METADATA ===
+version: "1.0"
+author: "Your Name"
+updated: "2025-01-15"
+tagline: "Short one-liner for dashboard cards"
+
+# Example prompts (shown in Info tab as "What You Can Ask")
+use_cases:
+  - "Do something useful"
+  - "Ask about [topic]"
+
+# === CAPABILITIES & FEATURES ===
+
+# Capabilities (shown as chips in UI)
+capabilities:
+  - feature_one
+  - feature_two
+
+# Sub-agents with descriptions (displayed in Info tab)
+sub_agents:
+  - name: helper-agent
+    description: "What this sub-agent does"
+  - name: another-agent
+    description: "Another sub-agent description"
+
+# Slash commands with descriptions
+commands:
+  - name: my-command
+    description: "What this command does"
+  - name: another-command
+    description: "Another command description"
+
+# MCP servers with descriptions (for Info tab display)
+mcp_servers:
+  - name: server-name
+    description: "What this MCP server provides"
+
+# Skills (for documentation/seeding - managed at platform level)
+# Skills in .claude/skills/ are seeded to Platform Skills Library on first deploy
+skills:
+  - name: my-skill
+    description: "What this skill enables"
+
+# Supported platforms (if applicable)
+platforms:
+  - trinity
+  - local
+
+# === GIT CONFIGURATION ===
+# Two sync modes are available:
+#
+# SOURCE MODE (default): Pull-only from GitHub
+#   - Agent tracks the source branch (main) directly
+#   - Changes are pulled from GitHub, never pushed back
+#   - Use when developing locally and pushing to GitHub
+#   - git.push_enabled is ignored in this mode
+#
+# WORKING BRANCH MODE (legacy): Bidirectional sync
+#   - Agent creates unique branch: trinity/{agent}/{instance-id}
+#   - Changes can be pushed back to GitHub
+#   - Set source_mode=false when creating agent to enable
+#
+git:
+  push_enabled: true              # Only applies to Working Branch Mode
+  commit_paths:                   # Paths auto-committed on sync (Working Branch Mode only)
+    - memory/
+    - outputs/
+    - CLAUDE.md
+  ignore_paths:
+    - .mcp.json
+    - .env
+    - "*.log"
+
+# === SHARED FOLDERS ===
+# File-based collaboration between agents
+# These are DEFAULT values when agent is created from template
+shared_folders:
+  expose: false                   # Expose /home/developer/shared-out
+  consume: false                  # Mount shared folders from permitted agents
+
+# === CUSTOM METRICS ===
+# Agent-specific KPIs displayed in Trinity UI
+# See "Custom Metrics" section for complete documentation
+metrics:
+  - name: metric_name             # Required: internal identifier (snake_case)
+    type: counter                 # Required: counter|gauge|percentage|status|duration|bytes
+    label: "Display Label"        # Required: shown in UI
+    description: "What this tracks"  # Optional: tooltip
+    unit: "items"                 # Optional: unit label (gauge type)
+    warning_threshold: 80         # Optional (percentage type): yellow if below
+    critical_threshold: 50        # Optional (percentage type): red if below
+    values:                       # Required for status type only
+      - value: "active"           # Value written to metrics.json
+        color: "green"            # green|red|yellow|gray|blue|orange
+        label: "Active"           # Display label in UI
+```
+
+---
+
+## CLAUDE.md Requirements
+
+Every Trinity-compatible agent MUST have a CLAUDE.md with **domain-specific** content.
+
+### Recommended Structure
+
+```markdown
+# Agent Name
+
+## Identity
+Who this agent is and what it does.
+Your role, expertise, and personality.
+
+## Domain Expertise
+What you specialize in. Your knowledge areas.
+
+## Available Tools
+What MCP servers and integrations you have access to.
+
+## Workflows
+Domain-specific processes you follow.
+How you approach tasks in your specialty.
+
+## Constraints
+- Domain-specific rules
+- Safety constraints for your area
+- Things you should NOT do
+```
+
+### Imports
+
+CLAUDE.md files can import other files using `@path/to/file` syntax:
+
+```markdown
+See @README.md for project overview and @package.json for npm commands.
+
+# Additional Instructions
+- Git workflow: @docs/git-instructions.md
+- Individual preferences: @~/.claude/my-project-instructions.md
+```
+
+Imports support relative paths, absolute paths, and `~` for home directory. Not evaluated inside code blocks.
+
+### Best Practices
+
+| ✅ Include | ❌ Exclude |
+|-----------|-----------|
+| Bash commands Claude can't guess | Anything Claude can infer from code |
+| Code style rules differing from defaults | Standard language conventions |
+| Testing instructions and runners | Detailed API docs (link instead) |
+| Repository etiquette (branch naming, PRs) | Information that changes frequently |
+| Architectural decisions | Long explanations or tutorials |
+| Common gotchas | Self-evident practices ("write clean code") |
+
+**If Claude ignores rules**, the file is probably too long. Use emphasis for critical rules: `IMPORTANT: Always run tests before committing`
+
+---
+
+## Runtime Options
+
+Trinity supports multiple AI runtimes, allowing you to choose the best provider for each agent's use case.
+
+### Available Runtimes
+
+| Runtime | Provider | Context Window | Pricing | Best For |
+|---------|----------|----------------|---------|----------|
+| `claude-code` | Anthropic | 200K tokens | Pay-per-use | Complex reasoning, code quality |
+| `gemini-cli` | Google | 1M tokens | Free tier | Large codebases, data processing |
+
+### Configuring Runtime in template.yaml
+
+```yaml
+# Option 1: Simple runtime selection
+runtime:
+  type: gemini-cli
+
+# Option 2: With model override
+runtime:
+  type: gemini-cli
+  model: gemini-2.5-pro
+
+# Option 3: Claude with specific model
+runtime:
+  type: claude-code
+  model: opus  # or sonnet, haiku
+```
+
+### Default Behavior
+
+If `runtime:` is not specified, agents default to `claude-code` for backward compatibility.
+
+### Environment Requirements
+
+| Runtime | Required Environment Variable |
+|---------|------------------------------|
+| `claude-code` | `ANTHROPIC_API_KEY` |
+| `gemini-cli` | `GOOGLE_API_KEY` |
+
+See [Gemini Support Guide](GEMINI_SUPPORT.md) for detailed setup instructions and cost comparisons.
+
+---
+
+## Credential Management
+
+> **Updated 2026-02-05 (CRED-002)**: Simplified credential system using direct file injection with encrypted git storage.
+
+### Credential Flow
+
+Credentials are managed as files in the agent workspace:
+
+1. **`.env`** — Source of truth for KEY=VALUE credentials
+2. **`.mcp.json`** — MCP server configuration (edit directly, no template substitution)
+3. **`.credentials.enc`** — Encrypted backup safe for git commits
+
+### Injecting Credentials
+
+- **Via UI**: Agent Detail → Credentials tab → Quick Inject (paste KEY=VALUE text)
+- **Via MCP**: `inject_credentials(agent_name, {".env": "KEY=value\n"})`
+- **Via API**: `POST /api/agents/{name}/credentials/inject`
+
+### Export/Import for Git
+
+To persist credentials across deployments:
+
+1. **Export**: Click "Export to Git" → encrypts `.env` and `.mcp.json` → writes `.credentials.enc`
+2. **Commit**: The `.credentials.enc` file is safe to commit (AES-256-GCM encrypted)
+3. **Auto-import**: On agent start, if `.credentials.enc` exists but `.env` doesn't, credentials are automatically decrypted and injected
+
+### Your Agent Should
+
+- Read MCP credentials from `.mcp.json` (Claude Code does this automatically)
+- Read script credentials from `.env` or environment variables
+- Never store plaintext credentials in committed files
+- Use `.credentials.enc` for secure credential persistence in git
+
+---
+
+## Inter-Agent Collaboration
+
+### MCP Tools for Collaboration
+
+Agents use Trinity MCP for collaboration:
+
+```
+mcp__trinity__chat_with_agent(
+    agent_name="cornelius",
+    message="Research: {topic}"
+)
+```
+
+### Access Control
+
+Permission checks before any agent-to-agent communication:
+
+- **Same owner**: Allowed
+- **Explicit permission granted**: Allowed (via Permissions tab)
+- **Admin**: Allowed (bypass)
+- **Otherwise**: Denied with error
+
+### Delegation Pattern
+
+When an agent needs help from another agent, it can create a delegation task:
+
+```yaml
+tasks:
+  - id: "task-003"
+    name: "Get research from Cornelius"
+    status: "active"
+    type: "delegation"
+    delegate_to: "agent-cornelius"
+    delegate_message: "Research AI agent architectures"
+```
+
+---
+
+## Shared Folders
+
+Trinity enables file-based collaboration between agents via shared Docker volumes.
+
+### Folder Paths
+
+| Path | Purpose |
+|------|---------|
+| `/home/developer/shared-out` | **Your agent's shared folder** - accessible to permitted agents |
+| `/home/developer/shared-in/{agent-name}` | **Other agents' folders** - read/write access |
+
+### How It Works
+
+1. **Expose**: When enabled, creates a Docker volume (`agent-{name}-shared`) mounted at `/home/developer/shared-out`. Other permitted agents can mount this.
+
+2. **Consume**: When enabled, mounts shared folders of all agents you have permission to call at `/home/developer/shared-in/{agent-name}`.
+
+3. **Permissions**: Access follows the Agent Permissions system. Agent B can only mount Agent A's folder if:
+   - Agent A has expose enabled
+   - Agent B has consume enabled
+   - Agent B has permission to call Agent A
+
+### Template Configuration
+
+Set defaults in `template.yaml`:
+
+```yaml
+shared_folders:
+  expose: true    # Expose /home/developer/shared-out
+  consume: true   # Mount shared folders from permitted agents
+```
+
+### Example Usage
+
+**Agent A** (exposing):
+```bash
+echo "Data from Agent A" > /home/developer/shared-out/report.txt
+```
+
+**Agent B** (consuming, with permission to call Agent A):
+```bash
+cat /home/developer/shared-in/agent-a/report.txt
+```
+
+**Note**: Changes to shared folder config require an agent restart.
+
+---
+
+## Platform Skills
+
+**Skills are the recommended way to encode reusable knowledge for agents.** A Skill is a markdown file that teaches Claude how to do something specific — like reviewing PRs using your team's standards or generating commit messages in your preferred format. When an agent encounters a task that matches a Skill's purpose, Claude automatically applies it.
+
+Unlike slash commands (which require `/command` to invoke), **skills are model-invoked**: Claude decides which skills to use based on the task at hand. This makes skills ideal for organizational knowledge that should be consistently applied.
+
+### How Trinity Manages Skills
+
+1. **Platform stores skills** in a centralized library (synced from GitHub or created via UI)
+2. **Admins manage skills** via the `/skills` page (create, edit, delete)
+3. **Owners assign skills** to their agents via the Skills tab
+4. **Skills are injected** into `~/.claude/skills/<name>/SKILL.md` on agent start
+5. **CLAUDE.md is updated** with a "Platform Skills" section listing available skills
+
+### Skill Types
+
+Use naming conventions to indicate how a skill should be applied:
+
+| Type | Naming Convention | When to Use | Example |
+|------|-------------------|-------------|---------|
+| `policy` | `policy-*` | Always-active rules that Claude follows implicitly | `policy-code-review`, `policy-security` |
+| `procedure` | `procedure-*` | Step-by-step instructions for specific tasks | `procedure-incident-response`, `procedure-deploy` |
+| `methodology` | (no prefix) | General guidance for approaches to problems | `verification`, `tdd`, `systematic-debugging` |
+
+### Writing Effective Skills
+
+Every skill needs a `SKILL.md` file with YAML frontmatter and markdown instructions:
+
+```yaml
+---
+name: code-review
+description: Reviews code for quality, security, and best practices. Use when reviewing pull requests, code changes, or asking "is this code good?"
+---
+
+# Code Review
+
+## Instructions
+
+When reviewing code, check for:
+1. **Security issues** - SQL injection, XSS, exposed secrets
+2. **Error handling** - Are all error cases handled?
+3. **Performance** - Any obvious N+1 queries or inefficient loops?
+4. **Readability** - Is the code self-documenting?
+
+## Output Format
+
+Provide feedback in three sections:
+- **Critical**: Must fix before merge
+- **Suggestions**: Would improve the code
+- **Good**: Highlight what was done well
+```
+
+#### Frontmatter Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Skill identifier (lowercase, hyphens, max 64 chars) |
+| `description` | Yes | What the skill does and when to use it. **Claude uses this to decide when to apply the skill.** |
+| `allowed-tools` | No | Restrict which tools Claude can use (e.g., `Read, Grep, Glob` for read-only) |
+| `disable-model-invocation` | No | Set `true` to prevent Claude from auto-invoking. User must invoke with `/skill-name`. Use for workflows with side effects. |
+| `user-invocable` | No | Set `false` to hide from `/` menu. Use for background knowledge Claude should apply automatically but users shouldn't invoke directly. |
+| `argument-hint` | No | Autocomplete hint (e.g., `[issue-number]`, `[filename] [format]`) |
+| `model` | No | Override model for this skill (`sonnet`, `opus`, `haiku`) |
+| `context` | No | Set to `fork` to run in isolated subagent context |
+| `agent` | No | Subagent type when `context: fork` (`Explore`, `Plan`, or custom agent name) |
+| `hooks` | No | Lifecycle hooks scoped to this skill (`PreToolUse`, `PostToolUse`, `Stop`) |
+
+#### Invocation Control
+
+| Frontmatter | User can invoke | Claude can invoke | Context behavior |
+|-------------|-----------------|-------------------|------------------|
+| (default) | ✅ | ✅ | Description loaded, full skill on invoke |
+| `disable-model-invocation: true` | ✅ | ❌ | Not in context until user invokes |
+| `user-invocable: false` | ❌ | ✅ | Description loaded, auto-applied when relevant |
+
+#### String Substitutions
+
+Skills support variable substitution:
+
+| Variable | Description |
+|----------|-------------|
+| `$ARGUMENTS` | All arguments passed when invoking (e.g., `/fix-issue 123` → `123`) |
+| `$ARGUMENTS[N]` or `$N` | Specific argument by index (`$0` = first, `$1` = second) |
+| `${CLAUDE_SESSION_ID}` | Current session ID (useful for logging, session-specific files) |
+
+```yaml
+---
+name: fix-issue
+description: Fix a GitHub issue
+disable-model-invocation: true
+---
+Fix GitHub issue $ARGUMENTS following our coding standards.
+# Or: Migrate the $0 component from $1 to $2.
+```
+
+#### Dynamic Context Injection
+
+The `!`command`` syntax runs shell commands before skill content is sent to Claude:
+
+```yaml
+---
+name: pr-summary
+description: Summarize a pull request
+context: fork
+agent: Explore
+---
+## Context
+- PR diff: !`gh pr diff`
+- Changed files: !`gh pr diff --name-only`
+
+Summarize this pull request...
+```
+
+Commands execute immediately; output replaces the placeholder. Claude only sees the final rendered content.
+
+#### Description Best Practices
+
+The description is critical — Claude uses it to decide whether to apply the skill. A good description:
+
+```yaml
+# ❌ Bad - too vague
+description: Helps with code
+
+# ✅ Good - specific actions and trigger terms
+description: Reviews code for quality, security, and best practices. Use when reviewing pull requests, code changes, or asking "is this code good?"
+```
+
+Include:
+1. **What it does**: Specific capabilities (reviews, generates, validates)
+2. **When to use it**: Trigger phrases users would say ("review this PR", "is this secure?")
+
+### Restricting Tool Access
+
+Use `allowed-tools` to limit what Claude can do when a skill is active:
+
+```yaml
+---
+name: read-only-analysis
+description: Analyze code without making changes
+allowed-tools: Read, Grep, Glob
+---
+```
+
+This is useful for:
+- Read-only skills that shouldn't modify files
+- Security-sensitive workflows
+- Analysis tasks that should never write
+
+### Skill Size Guidelines
+
+- **Keep `SKILL.md` under 500 lines.** Move detailed reference material to separate files.
+- **Skill descriptions budget**: ~15,000 characters total across all skills. If you have many skills, some may be excluded from context.
+- **Bundled scripts** run without consuming context tokens — only their output does.
+
+### Multi-File Skills
+
+For complex skills, use progressive disclosure — essential info in `SKILL.md`, details in supporting files:
+
+```
+my-skill/
+├── SKILL.md           # Overview and navigation (<500 lines)
+├── reference.md       # Detailed docs (loaded when needed)
+├── examples.md        # Usage examples
+└── scripts/
+    └── validate.py    # Utility script (executed, not loaded)
+```
+
+In `SKILL.md`, reference the files:
+
+```markdown
+For detailed API reference, see [reference.md](reference.md).
+
+To validate input, run:
+```bash
+python scripts/validate.py input.txt
+```
+
+### Agent Perspective
+
+Agents see assigned skills in the standard Claude Code location:
+
+```
+~/.claude/skills/
+├── verification/
+│   └── SKILL.md
+├── systematic-debugging/
+│   └── SKILL.md
+└── policy-code-review/
+    └── SKILL.md
+```
+
+The agent's `CLAUDE.md` is also updated with a "Platform Skills" section:
+
+```markdown
+## Platform Skills
+
+This agent has the following skills installed in `~/.claude/skills/`:
+
+- `/verification` - Use with /verification command
+- `/systematic-debugging` - Use with /systematic-debugging command
+- `/policy-code-review` - Use with /policy-code-review command
+```
+
+This allows agents to answer "what skills do you have?" without scanning the filesystem.
+
+### What This Means for Templates
+
+**Templates should NOT include `.claude/skills/`** — skills are managed at the platform level and assigned per-agent. If your template includes skills in `.claude/skills/`, they will be seeded to the platform library on first deployment, then managed centrally.
+
+### Syncing Skills
+
+When skills are updated at the platform level, agents receive updates:
+- **On next start**: Skills automatically injected
+- **While running**: Use "Inject to Agent" button in Skills tab or MCP `sync_agent_skills` tool
+
+### MCP Tools for Skills
+
+Agents can interact with the skills system programmatically:
+
+| Tool | Description |
+|------|-------------|
+| `list_skills` | List all platform skills |
+| `get_skill` | Get skill details and content |
+| `assign_skill_to_agent` | Assign a skill to an agent |
+| `sync_agent_skills` | Re-inject skills to running agent |
+
+### Skills vs. Slash Commands vs. CLAUDE.md
+
+| Mechanism | Invoked By | Best For |
+|-----------|------------|----------|
+| **Skills** | Claude (automatic) | Reusable knowledge that applies across many situations |
+| **Slash commands** | User (`/command`) | Specific actions the user explicitly requests |
+| **CLAUDE.md** | Always loaded | Project-wide context and constraints |
+
+**Use skills when**: The knowledge should apply automatically based on the task (e.g., always apply security review standards when reviewing code).
+
+**Use slash commands when**: The user needs to explicitly trigger an action (e.g., `/deploy staging`).
+
+---
+
+## Custom Metrics
+
+Agents can define custom KPIs displayed in the Trinity UI Metrics tab. This enables domain-specific observability beyond generic tool call counts.
+
+### Metric Types
+
+| Type | Description | Display | Example |
+|------|-------------|---------|---------|
+| `counter` | Monotonically increasing | Large number | "42 Messages" |
+| `gauge` | Value that can go up/down | Number + optional unit | "12.5 Avg Words" |
+| `percentage` | 0-100 with progress bar | Colored bar | "75% Success" |
+| `status` | Enum/state value | Colored badge | "Active", "Idle" |
+| `duration` | Time in seconds | Formatted time | "2h 15m" |
+| `bytes` | Size in bytes | Formatted size | "1.2 MB" |
+
+### How It Works
+
+1. Define metrics in `template.yaml` under `metrics:`
+2. Agent writes values to `metrics.json` in workspace
+3. Trinity UI displays metrics in the Metrics tab (auto-refresh every 30 seconds)
+4. **Agent must be running** for metrics to be visible
+
+### File Locations
+
+The agent server reads from the agent's working directory (`/home/developer/`):
+- **Definitions**: `/home/developer/template.yaml`
+- **Values**: `/home/developer/metrics.json`
+
+### template.yaml Metric Definitions
+
+```yaml
+metrics:
+  # Counter - monotonically increasing value
+  - name: messages_processed        # Internal identifier (snake_case)
+    type: counter
+    label: "Messages"               # Display label
+    description: "Total messages"   # Tooltip text
+
+  # Gauge - value that goes up and down
+  - name: avg_response_time
+    type: gauge
+    label: "Avg Response"
+    unit: "ms"                      # Optional unit label
+
+  # Percentage - with color thresholds
+  - name: success_rate
+    type: percentage
+    label: "Success Rate"
+    warning_threshold: 80           # Yellow if below 80%
+    critical_threshold: 50          # Red if below 50%
+
+  # Status - enum with colored badges
+  - name: current_state
+    type: status
+    label: "State"
+    values:                         # Required for status type
+      - value: "active"             # The value in metrics.json
+        color: "green"              # green, red, yellow, gray, blue, orange
+        label: "Active"             # Display label
+      - value: "idle"
+        color: "gray"
+        label: "Idle"
+      - value: "error"
+        color: "red"
+        label: "Error"
+
+  # Duration - time in seconds
+  - name: last_cycle_duration
+    type: duration
+    label: "Last Cycle"
+    description: "Duration of last processing cycle"
+
+  # Bytes - size in bytes
+  - name: cache_size
+    type: bytes
+    label: "Cache Size"
+```
+
+### metrics.json Format
+
+Your agent writes current values to `metrics.json`:
+
+```json
+{
+  "messages_processed": 42,
+  "avg_response_time": 125.5,
+  "success_rate": 87.5,
+  "current_state": "active",
+  "last_cycle_duration": 120,
+  "cache_size": 1048576,
+  "last_updated": "2025-12-10T10:30:00Z"
+}
+```
+
+**Notes:**
+- Keys must match the `name` field in template.yaml
+- `last_updated` is optional but recommended (shown as "Updated X ago" in UI)
+- Values are read when the Metrics tab is viewed or refreshed
+
+### Complete Example
+
+**template.yaml:**
+```yaml
+name: research-agent
+display_name: Research Agent
+description: Autonomous researcher
+
+resources:
+  cpu: "1"
+  memory: "2g"
+
+metrics:
+  - name: research_cycles
+    type: counter
+    label: "Research Cycles"
+    description: "Total research cycles completed"
+
+  - name: findings_discovered
+    type: counter
+    label: "Findings"
+    description: "Total findings discovered"
+
+  - name: research_status
+    type: status
+    label: "Status"
+    values:
+      - value: "active"
+        color: "green"
+        label: "Researching"
+      - value: "idle"
+        color: "gray"
+        label: "Idle"
+
+  - name: last_cycle_duration
+    type: duration
+    label: "Last Cycle"
+```
+
+**Updating metrics in your agent:**
+```bash
+# In a script or via Claude Code
+cat > /home/developer/metrics.json << 'EOF'
+{
+  "research_cycles": 5,
+  "findings_discovered": 23,
+  "research_status": "idle",
+  "last_cycle_duration": 180,
+  "last_updated": "2025-12-10T10:30:00Z"
+}
+EOF
+```
+
+**In CLAUDE.md instructions:**
+```markdown
+## Metrics Tracking
+
+After each research cycle, update metrics.json:
+- Increment `research_cycles`
+- Update `findings_discovered` count
+- Set `research_status` to "active" during work, "idle" when done
+- Record `last_cycle_duration` in seconds
+```
+
+---
+
+## Agent Dashboard
+
+Agents can define a custom dashboard displayed in the Trinity UI Dashboard tab.
+
+### File Location
+
+Save the dashboard configuration to **`/home/developer/dashboard.yaml`** — the root of the agent's working directory.
+
+If the file does not exist, no dashboard will be displayed.
+
+### Basic Structure
+
+```yaml
+title: "My Agent Dashboard"
+refresh: 30                    # Auto-refresh interval (seconds, min 5)
+
+sections:
+  - title: "Status"
+    layout: grid               # 'grid' or 'list'
+    columns: 3                 # 1-4 columns
+    widgets:
+      - type: metric
+        label: "Total Tasks"
+        value: 42
+        trend: up
+
+      - type: status
+        label: "System"
+        value: "Healthy"
+        color: green           # green, red, yellow, gray, blue, orange
+
+      - type: progress
+        label: "Disk Usage"
+        value: 75
+        color: yellow
+```
+
+### Widget Types
+
+| Type | Required Fields | Description |
+|------|----------------|-------------|
+| `metric` | label, value | Number with optional trend (up/down) |
+| `status` | label, value, color | Colored badge |
+| `progress` | label, value | Progress bar (0-100) |
+| `text` | **content** | Plain text (NOT `text` or `value`) |
+| `markdown` | **content** | Rendered markdown |
+| `table` | columns, rows | Tabular data |
+| `list` | **items** | Bullet/numbered list (NOT `values` or `list`) |
+| `link` | label, **url** | Clickable link (NOT `href`) |
+| `image` | src, alt | Image display |
+| `divider` | - | Horizontal line |
+| `spacer` | - | Vertical space |
+
+### Widget Examples (All Types)
+
+**IMPORTANT**: Use exact field names shown below. Common mistakes:
+- `text` widget requires `content` (not `text`, `value`, or `label`)
+- `list` widget requires `items` (not `values`, `list`, or `content`)
+- `link` widget requires `url` (not `href` or `link`)
+
+```yaml
+widgets:
+  # METRIC - numeric value with optional trend
+  - type: metric
+    label: "Total Tasks"        # Required
+    value: 42                   # Required (number)
+    trend: up                   # Optional: up, down
+    trend_value: "+12%"         # Optional
+    unit: "tasks"               # Optional
+    description: "Since start"  # Optional
+
+  # STATUS - colored badge
+  - type: status
+    label: "System Status"      # Required
+    value: "Healthy"            # Required (string)
+    color: green                # Required: green, red, yellow, gray, blue, orange, purple
+
+  # PROGRESS - progress bar (0-100)
+  - type: progress
+    label: "Disk Usage"         # Required
+    value: 75                   # Required (0-100)
+    color: yellow               # Optional: green, red, yellow, blue
+
+  # TEXT - plain text (NOT 'text' or 'value'!)
+  - type: text
+    content: "This is plain text"  # Required - MUST use 'content'
+    size: md                       # Optional: xs, sm, md, lg
+    color: gray                    # Optional
+    align: center                  # Optional: left, center, right
+
+  # MARKDOWN - rendered markdown
+  - type: markdown
+    content: "**Bold** and *italic* text"  # Required - MUST use 'content'
+
+  # TABLE - tabular data
+  - type: table
+    title: "Recent Events"      # Optional
+    columns:                    # Required
+      - { key: date, label: Date }
+      - { key: event, label: Event }
+    rows:                       # Required
+      - { date: "2024-01-01", event: "Started" }
+      - { date: "2024-01-02", event: "Completed" }
+    max_rows: 5                 # Optional
+
+  # LIST - bullet or numbered list (NOT 'values'!)
+  - type: list
+    title: "Tasks"              # Optional
+    items:                      # Required - MUST use 'items'
+      - "Task 1"
+      - "Task 2"
+      - "Task 3"
+    style: bullet               # Optional: bullet, number, none
+    max_items: 10               # Optional
+
+  # LINK - clickable link (NOT 'href'!)
+  - type: link
+    label: "Documentation"      # Required
+    url: "https://example.com"  # Required - MUST use 'url'
+    external: true              # Optional: opens in new tab
+    style: button               # Optional: 'button' or omit for text link
+    color: blue                 # Optional
+
+  # IMAGE - image display
+  - type: image
+    src: "/files/chart.png"     # Required (or full URL)
+    alt: "Chart description"    # Required
+    caption: "Weekly metrics"   # Optional
+
+  # DIVIDER - horizontal line
+  - type: divider
+
+  # SPACER - vertical space
+  - type: spacer
+    size: lg                    # Optional: sm (8px), md (16px), lg (32px)
+```
+
+### Updating Dashboard Data
+
+Your agent updates the dashboard by rewriting `dashboard.yaml`. Use dynamic values:
+
+```yaml
+widgets:
+  - type: metric
+    label: "Processed"
+    value: 127              # Update this value in your agent
+    description: "Last run: 2 min ago"
+```
+
+**Note**: Agent must be running for dashboard to display. See `docs/memory/feature-flows/agent-dashboard.md` for complete schema.
+
+---
+
+## Memory Management
+
+Agents manage their own memory. Trinity provides storage, not strategy. Each agent can implement memory however it sees fit.
+
+### Example Structure (Optional)
+
+This is a suggested pattern, not a requirement:
+
+```
+memory/
+├── context.md           # Long-term learned context
+├── preferences.json     # User preferences
+├── session_notes/       # Per-session working notes
+│   └── 2025-12-05.md
+└── summaries/           # Compressed old context
+    └── 2025-11.md       # Monthly summary
+```
+
+---
+
+## Content Folder Convention
+
+For agents that generate large files (videos, audio, images, exports), Trinity provides a standard convention to prevent Git repository bloat.
+
+### The Problem
+
+Large generated files:
+- Bloat Git repositories (video files can be 100s of MB)
+- Slow down GitHub sync operations
+- Risk accidental commits
+
+### The Solution
+
+Trinity automatically creates a `content/` directory structure:
+
+```
+/home/developer/content/
+├── videos/      # Generated video files
+├── audio/       # Generated audio files
+├── images/      # Generated images
+└── exports/     # Data exports, large files
+```
+
+**Key Properties:**
+- ✅ **Persists** - Files survive container restarts (same Docker volume as workspace)
+- ✅ **Excluded from Git** - Automatically added to `.gitignore`
+- ✅ **Not synced** - Git sync ignores `content/` directory
+
+### Usage in Your Agent
+
+When generating large assets, save them to `content/`:
+
+```python
+# In your agent's scripts
+output_path = "/home/developer/content/videos/my-video.mp4"
+```
+
+```markdown
+# In your CLAUDE.md
+When generating videos, save them to `content/videos/`.
+When exporting data, save to `content/exports/`.
+```
+
+### outputs/ vs content/
+
+| Directory | Synced to Git? | Use For |
+|-----------|---------------|---------|
+| `outputs/` | ✅ Yes | Small files you want versioned (reports, summaries) |
+| `content/` | ❌ No | Large files that shouldn't be in Git (videos, audio) |
+
+---
+
+## Package Persistence
+
+When agents install system packages (via `apt-get`, `npm install -g`, etc.), those packages are lost when the container is updated. Trinity provides a setup script convention to handle this.
+
+### How It Works
+
+1. When an agent installs a system package, it also appends the command to `~/.trinity/setup.sh`
+2. On container start, Trinity runs this script automatically
+3. Packages are reinstalled, surviving image updates
+
+### Setup Script Location
+
+```
+/home/developer/.trinity/setup.sh
+```
+
+This file lives in the persistent workspace volume and survives container recreation.
+
+### Usage Pattern
+
+When installing packages, always add them to the setup script:
+
+```bash
+# Install the package
+sudo apt-get install -y ffmpeg
+
+# Remember it for future container starts
+mkdir -p ~/.trinity
+echo "sudo apt-get install -y ffmpeg" >> ~/.trinity/setup.sh
+```
+
+### Pre-configuring in Templates
+
+Templates can ship with a pre-defined `setup.sh`:
+
+```
+my-agent/
+├── .trinity/
+│   └── setup.sh          # Pre-defined package installations
+├── template.yaml
+└── CLAUDE.md
+```
+
+Example `setup.sh` for a video processing agent:
+
+```bash
+#!/bin/bash
+# Package persistence script - runs on every container start
+
+# System packages
+sudo apt-get update -qq
+sudo apt-get install -y -qq ffmpeg imagemagick
+
+# Global npm packages
+npm install -g typescript ts-node
+
+# Python packages (user-space)
+pip install --user opencv-python moviepy
+```
+
+### What Goes Where
+
+| Package Type | Persists Automatically? | Setup Script Needed? |
+|--------------|------------------------|---------------------|
+| `pip install --user` | ✅ Yes (in ~/.local) | No |
+| `npm install` (local) | ✅ Yes (in node_modules/) | No |
+| `go install` | ✅ Yes (in ~/go/) | No |
+| `apt-get install` | ❌ No | Yes |
+| `npm install -g` | ❌ No | Yes |
+| System-level configs | ❌ No | Yes |
+
+### Best Practices
+
+1. **Prefer user-space installs**: `pip install --user`, local `npm install` when possible
+2. **Keep setup.sh idempotent**: Use `-y` flags, check if already installed
+3. **Minimize apt-get**: Each install adds startup time
+4. **Document dependencies**: List required packages in README.md
+
+---
+
+## Compatibility Checklist
+
+An agent is Trinity-compatible if:
+
+### Required Files
+- [ ] Has `template.yaml` with required fields (name, display_name, description, version, resources)
+- [ ] Has `CLAUDE.md` with identity and domain-specific instructions
+- [ ] Has `.mcp.json.template` with `${VAR}` placeholders (if using MCP servers)
+- [ ] Has `.env.example` documenting required credentials
+- [ ] Has `.gitignore` excluding secrets and large content
+
+### Directory Structure
+- [ ] (Optional) Has `docs/` directory for documentation
+
+### Security
+- [ ] No credentials stored in repository
+- [ ] `.mcp.json` and `.env` are gitignored
+- [ ] Sensitive files excluded from git sync paths
+
+### Behavior
+- [ ] Agent CLAUDE.md focuses on domain-specific instructions
+- [ ] Can run both locally and on Trinity platform
+
+---
+
+## Migration Guide
+
+To convert an existing agent to Trinity-compatible:
+
+1. **Create repository structure** matching the directory layout above
+2. **Extract CLAUDE.md** from current instructions (domain-specific only)
+3. **Create template.yaml** with metadata and credentials
+4. **Create .mcp.json.template** from current .mcp.json (replace values with ${VAR})
+5. **Create .env.example** listing all required variables
+6. **Add .gitignore** excluding secrets and platform directories
+7. **Deploy to Trinity** and verify
+
+---
+
+## Best Practices
+
+### Security
+- Never commit secrets to the repository
+- Use `.env.example` with placeholder values, not real credentials
+- Add `.env` and `.mcp.json` to `.gitignore`
+- Review git diffs before committing
+
+### Credential Naming
+Use descriptive names that indicate the service:
+```
+TWITTER_API_KEY          # Good
+CLOUDINARY_API_SECRET    # Good
+API_KEY                  # Bad - too generic
+KEY1                     # Bad - meaningless
+```
+
+### Template Validation
+Before publishing, verify:
+- [ ] `template.yaml` has all required fields
+- [ ] All `${VAR}` placeholders in `.mcp.json.template` are listed in `credentials`
+- [ ] `.env.example` documents all variables
+- [ ] No secrets are committed anywhere
+
+### Domain Focus
+- Keep CLAUDE.md focused on your agent's specialty
+- Let Trinity handle collaboration and infrastructure
+- Use outputs/ for generated content
+
+### Documentation
+- Keep documentation in a `docs/` folder
+- Use README.md for quick-start and overview
+- Document workflows, integrations, and constraints
+
+---
+
+## Autonomous Agent Design
+
+Trinity agents achieve autonomy through a three-phase lifecycle:
+
+```
+DEVELOP → PACKAGE → SCHEDULE
+```
+
+1. **Develop** — Refine procedures interactively until they consistently produce good results
+2. **Package** — Codify proven procedures as slash commands in `.claude/commands/`
+3. **Schedule** — Run commands on cron via `schedules:` in template.yaml or the UI
+
+### Autonomy Design Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **Self-contained** | No user input during execution |
+| **Deterministic output** | Consistent format for parsing/alerts |
+| **Graceful degradation** | Partial results better than failure |
+| **Bounded scope** | Predictable runtime and cost |
+| **Idempotent** | Safe to run multiple times |
+
+### Quick Example
+
+```yaml
+# template.yaml
+schedules:
+  - name: Morning Health Check
+    cron: "0 8 * * *"
+    message: "/health-check"
+    timezone: "UTC"
+    enabled: true
+```
+
+```markdown
+# .claude/commands/health-check.md
+---
+description: Automated fleet health check
+allowed-tools: mcp__trinity__list_agents, mcp__trinity__get_agent
+---
+
+# Health Check
+1. List all agents using `mcp__trinity__list_agents`
+2. Evaluate context usage and last activity
+3. Generate structured report
+```
+
+→ **Full guide**: [Autonomous Agent Design Guide](AUTONOMOUS_AGENT_DESIGN.md)
+
+---
+
+## Revision History
+
+| Date | Changes |
+|------|---------|
+| 2026-02-05 | **Credential System Refactor (CRED-002)**: Updated Credential Management section for new simplified system; Direct file injection replaces Redis-based assignments; Export/Import with encrypted `.credentials.enc` for git storage; Auto-import on agent startup |
+| 2026-01-27 | **Advanced Skills & CLAUDE.md**: Added 8 new skill frontmatter fields (`disable-model-invocation`, `user-invocable`, `argument-hint`, `model`, `context`, `agent`, `hooks`); Added invocation control table; Added string substitutions (`$ARGUMENTS`, `$N`, `${CLAUDE_SESSION_ID}`); Added dynamic context injection (`!`command``); Added skill size guidelines; Added CLAUDE.md imports (`@path` syntax) and best practices table |
+| 2026-01-26 | **Platform Skills Best Practices**: Expanded Platform Skills section with comprehensive skill writing guidance; Added SKILL.md format, frontmatter fields, description best practices, `allowed-tools` for restricting tool access, multi-file skill patterns, Skills vs Commands vs CLAUDE.md comparison table; Emphasized skills as the recommended way to encode reusable knowledge |
+| 2026-01-25 | **Platform Skills**: Added new section documenting centralized Skills Library; Skills managed at platform level, mounted read-only into agents; Three skill types (policy, procedure, methodology); Updated directory structure and .gitignore notes |
+| 2026-01-13 | **Dashboard widget examples**: Added complete examples for ALL 11 widget types with required field names highlighted; Added warning box about common field name mistakes (`content` not `text`, `items` not `values`, `url` not `href`) |
+| 2026-01-13 | Added Agent Dashboard section with YAML schema and widget types reference |
+| 2026-01-12 | Expanded Custom Metrics section: added file locations, complete template.yaml examples for all 6 metric types (counter, gauge, percentage, status, duration, bytes), metrics.json format with last_updated field, complete working example, and CLAUDE.md integration guidance |
+| 2026-01-12 | Updated .gitignore: added instance-specific files (.npm, .ssh, .trinity, .cache, .claude.json, .sudo_as_admin_successful); clarified what to commit vs exclude from .claude/ directory |
+| 2026-01-12 | Added Package Persistence section with setup.sh convention for surviving container updates |
+| 2026-01-12 | Simplified guide: removed Platform Injection, Testing Locally, Troubleshooting, Registering with Trinity, Multi-Agent Systems sections; Made memory/ optional; Added docs/ best practice |
+| 2026-01-01 | Added Autonomous Agent Design section with lifecycle overview; Reference to detailed guide |
+| 2025-12-30 | Documented Source Mode (default) vs Working Branch Mode (legacy) in Git Configuration; Removed Task DAG/workplan content (feature removed 2025-12-23) |
+| 2025-12-27 | Added Content Folder Convention for large generated assets (videos, audio, images) |
+| 2025-12-24 | Removed Chroma MCP integration - templates should include their own vector memory if needed |
+| 2025-12-18 | Added Multi-Agent Systems section with System Manifest deployment reference |
+| 2025-12-14 | Consolidated from AGENT_TEMPLATE_SPEC.md and trinity-compatible-agent.md |
+| 2025-12-13 | Added shared folders |
+| 2025-12-10 | Added custom metrics specification |
+
+---
+
+*This document is the single source of truth for Trinity-compatible agent development.*

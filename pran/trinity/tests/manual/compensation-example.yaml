@@ -1,0 +1,50 @@
+# Compensation Example Process
+# Demonstrates rollback actions when process fails
+
+name: order-processing
+version: 1
+description: Process an order with compensation (rollback) handlers
+
+steps:
+  - id: reserve-inventory
+    name: Reserve Inventory
+    type: agent_task
+    agent: inventory-agent
+    message: "Reserve {{input.quantity}} units of product {{input.product_id}}"
+    compensation:
+      type: agent_task
+      agent: inventory-agent
+      message: "ROLLBACK: Release reserved inventory for product {{input.product_id}}"
+
+  - id: charge-payment
+    name: Charge Payment
+    type: agent_task
+    agent: payment-agent
+    message: "Charge ${{input.amount}} to payment method {{input.payment_id}}"
+    depends_on: [reserve-inventory]
+    compensation:
+      type: notification
+      channel: slack
+      message: ":warning: Payment rollback needed for order {{input.order_id}} - Amount: ${{input.amount}}"
+
+  - id: ship-order
+    name: Ship Order
+    type: agent_task
+    agent: shipping-agent
+    message: "Create shipment for order {{input.order_id}}"
+    depends_on: [charge-payment]
+    # No compensation - shipping is the last step
+
+outputs:
+  - name: order_status
+    source: "{{steps.ship-order.output}}"
+
+# Flow:
+# 1. Reserve inventory (with compensation to release)
+# 2. Charge payment (with compensation notification)
+# 3. Ship order
+#
+# If shipping fails:
+# - Payment compensation notification is sent
+# - Inventory compensation (release) is executed
+# Compensations run in reverse order of completion

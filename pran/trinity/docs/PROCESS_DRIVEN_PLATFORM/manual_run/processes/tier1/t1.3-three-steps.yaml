@@ -1,0 +1,61 @@
+# T1.3 - Three Steps with Dependencies
+# 
+# Purpose: Validate dependency chain with multiple steps
+# Agent: process-echo (step1, step2), process-worker (step3)
+# Expected: Sequential execution respecting dependencies
+#
+# Test Validates:
+# - Multi-step dependency resolution
+# - Different agents in same process
+# - Chained output passing (step1 -> step2 -> step3)
+# - All outputs accessible at completion
+
+name: t1.3-three-steps
+version: "1.0"
+description: "Three steps test - validates multi-step dependency chain"
+
+triggers:
+  - type: webhook
+    id: manual-start
+
+steps:
+  - id: research
+    name: Research Phase
+    type: agent_task
+    agent: process-echo
+    message: "Research topic: Process Engine Testing"
+    timeout: 120s
+
+  - id: analyze
+    name: Analysis Phase
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - research
+    message: "Analyze research results: {{steps.research.output.data.echo}}"
+    timeout: 120s
+
+  - id: report
+    name: Report Phase
+    type: agent_task
+    agent: process-worker
+    depends_on:
+      - analyze
+    message: "Generate report from analysis: {{steps.analyze.output.data.echo}}"
+    timeout: 120s
+
+# Expected Flow:
+# 1. research executes first (no dependencies)
+# 2. analyze waits for research, then executes with research output
+# 3. report waits for analyze, then executes with analyze output
+# 4. Process completes after report finishes
+
+# Verification Checklist:
+# [ ] research starts immediately
+# [ ] analyze waits for research to complete
+# [ ] analyze receives research.output.data.echo
+# [ ] report waits for analyze to complete  
+# [ ] report receives analyze.output.data.echo
+# [ ] All three steps complete successfully
+# [ ] Execution status: COMPLETED
+# [ ] Dependency order verified in timeline

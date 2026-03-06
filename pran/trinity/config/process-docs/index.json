@@ -1,0 +1,90 @@
+{
+  "sections": [
+    {
+      "id": "getting-started",
+      "title": "Getting Started",
+      "docs": [
+        {
+          "slug": "getting-started/what-are-processes",
+          "title": "What are Processes?"
+        },
+        {
+          "slug": "getting-started/first-process",
+          "title": "Your First Process"
+        },
+        {
+          "slug": "getting-started/step-types",
+          "title": "Understanding Step Types"
+        }
+      ]
+    },
+    {
+      "id": "tutorials",
+      "title": "Tutorials",
+      "docs": [
+        {
+          "slug": "tutorials/second-process",
+          "title": "Parallel Execution"
+        },
+        {
+          "slug": "tutorials/human-checkpoints",
+          "title": "Adding Human Checkpoints"
+        },
+        {
+          "slug": "tutorials/complex-workflows",
+          "title": "Complex Workflows"
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Reference",
+      "docs": [
+        {
+          "slug": "reference/yaml-schema",
+          "title": "YAML Schema"
+        },
+        {
+          "slug": "reference/variables",
+          "title": "Variable Interpolation"
+        },
+        {
+          "slug": "reference/triggers",
+          "title": "Triggers"
+        },
+        {
+          "slug": "reference/error-handling",
+          "title": "Error Handling"
+        }
+      ]
+    },
+    {
+      "id": "patterns",
+      "title": "Common Patterns",
+      "docs": [
+        {
+          "slug": "patterns/sequential",
+          "title": "Sequential Workflows"
+        },
+        {
+          "slug": "patterns/parallel",
+          "title": "Parallel Execution"
+        },
+        {
+          "slug": "patterns/approvals",
+          "title": "Approval Workflows"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "docs": [
+        {
+          "slug": "troubleshooting/common-errors",
+          "title": "Common Errors"
+        }
+      ]
+    }
+  ]
+}

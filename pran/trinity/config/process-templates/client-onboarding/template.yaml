@@ -1,0 +1,23 @@
+name: client-onboarding
+display_name: Client Onboarding Workflow
+description: End-to-end new client onboarding process from intake to proposal delivery
+category: consulting
+complexity: intermediate
+version: "1.0.0"
+author: Acme Consulting
+
+tags:
+  - consulting
+  - onboarding
+  - proposal
+  - client-engagement
+
+step_types_used:
+  - agent_task
+  - human_approval
+  - notification
+
+use_cases:
+  - "New client intake and qualification"
+  - "Proposal generation workflows"
+  - "Consulting engagement kickoff"

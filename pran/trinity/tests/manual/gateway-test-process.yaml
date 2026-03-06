@@ -1,0 +1,59 @@
+# Gateway Test Process
+# Tests: Gateway routing, condition evaluation, webhook trigger
+
+name: gateway-test
+version: 1
+description: Test process for gateway routing and webhook triggers
+
+triggers:
+  - type: webhook
+    id: gateway-test-hook
+    enabled: true
+    description: Trigger this process via webhook
+
+steps:
+  - id: analyze
+    name: Analyze Input
+    type: agent_task
+    agent: test-agent
+    message: "Analyzing score: {{input.score}}"
+
+  - id: route-decision
+    name: Score Router
+    type: gateway
+    gateway_type: exclusive
+    depends_on: [analyze]
+    routes:
+      - condition: "input.score > 80"
+        target: high-path
+      - condition: "input.score > 50"
+        target: medium-path
+    default_route: low-path
+
+  - id: high-path
+    name: High Score Path
+    type: agent_task
+    agent: test-agent
+    message: "Processing HIGH priority - score was above 80"
+    depends_on: [route-decision]
+    condition: "steps.route-decision.output.route == 'high-path'"
+
+  - id: medium-path
+    name: Medium Score Path
+    type: agent_task
+    agent: test-agent
+    message: "Processing MEDIUM priority - score was 51-80"
+    depends_on: [route-decision]
+    condition: "steps.route-decision.output.route == 'medium-path'"
+
+  - id: low-path
+    name: Low Score Path
+    type: agent_task
+    agent: test-agent
+    message: "Processing LOW priority - score was 50 or below"
+    depends_on: [route-decision]
+    condition: "steps.route-decision.output.route == 'low-path'"
+
+outputs:
+  - name: route_taken
+    source: "{{steps.route-decision.output.route}}"

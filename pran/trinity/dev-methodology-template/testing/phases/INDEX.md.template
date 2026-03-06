@@ -1,0 +1,162 @@
+# Testing Phases Index
+
+> Modular, phase-based testing framework.
+> Each phase builds on previous phases.
+
+---
+
+## Overview
+
+Testing is organized into sequential phases. Each phase:
+- Has explicit prerequisites (previous phases)
+- Tests a specific feature area
+- Has clear success criteria
+- Documents common issues
+
+---
+
+## Phase Dependencies
+
+```
+Phase 0: Setup
+    ↓
+Phase 1: Authentication
+    ↓
+Phase 2: Core Features
+    ↓
+Phase 3: Data Management
+    ↓
+Phase 4: User Features
+    ↓
+Phase 5: Advanced Features
+    ↓
+Phase 6: Integration Tests
+```
+
+---
+
+## Phase Summary
+
+| Phase | Name | Duration | Prerequisites |
+|-------|------|----------|---------------|
+| 0 | Setup & Environment | ~5 min | None |
+| 1 | Authentication | ~10 min | Phase 0 |
+| 2 | Core Features | ~15 min | Phase 1 |
+| 3 | Data Management | ~15 min | Phase 2 |
+| 4 | User Features | ~10 min | Phase 2 |
+| 5 | Advanced Features | ~20 min | Phase 3-4 |
+| 6 | Integration Tests | ~30 min | Phase 0-5 |
+
+**Total Estimated Time**: ~105 minutes for full suite
+
+---
+
+## Quick Reference
+
+### Running a Single Phase
+
+```bash
+# Run phase 2 tests
+npm test -- --grep "Phase 2"
+# or
+pytest -k "phase_2"
+```
+
+### Running All Phases
+
+```bash
+npm run test:phases
+# or
+pytest tests/phases/
+```
+
+---
+
+## Phase Details
+
+### Phase 0: Setup & Environment
+**File**: `PHASE_00_SETUP.md`
+**Tests**:
+- Application starts
+- Database connection
+- Environment variables loaded
+- Health endpoint responds
+
+### Phase 1: Authentication
+**File**: `PHASE_01_AUTH.md`
+**Tests**:
+- User login
+- User logout
+- Token validation
+- Protected routes
+
+### Phase 2: Core Features
+**File**: `PHASE_02_CORE.md`
+**Tests**:
+- Main feature functionality
+- Basic CRUD operations
+- Error handling
+
+### Phase 3: Data Management
+**File**: `PHASE_03_DATA.md`
+**Tests**:
+- Create operations
+- Read operations
+- Update operations
+- Delete operations
+- Validation
+
+### Phase 4: User Features
+**File**: `PHASE_04_USER.md`
+**Tests**:
+- User profile
+- User settings
+- Preferences
+
+### Phase 5: Advanced Features
+**File**: `PHASE_05_ADVANCED.md`
+**Tests**:
+- Search functionality
+- Filtering
+- Export/Import
+- Batch operations
+
+### Phase 6: Integration Tests
+**File**: `PHASE_06_INTEGRATION.md`
+**Tests**:
+- End-to-end flows
+- External service integration
+- Performance baselines
+
+---
+
+## Creating New Phases
+
+1. Copy `_PHASE_TEMPLATE.md`
+2. Rename to `PHASE_XX_NAME.md`
+3. Fill in test steps
+4. Add to this index
+5. Update dependencies
+
+---
+
+## Status Tracking
+
+Track completion status here:
+
+| Phase | Status | Last Run | Issues |
+|-------|--------|----------|--------|
+| 0 | ⏳ Not tested | - | - |
+| 1 | ⏳ Not tested | - | - |
+| 2 | ⏳ Not tested | - | - |
+| 3 | ⏳ Not tested | - | - |
+| 4 | ⏳ Not tested | - | - |
+| 5 | ⏳ Not tested | - | - |
+| 6 | ⏳ Not tested | - | - |
+
+**Status Legend**:
+- ⏳ Not tested
+- 🚧 In progress
+- ✅ Passed
+- ❌ Failed
+- ⚠️ Passed with issues

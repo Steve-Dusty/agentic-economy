@@ -1,0 +1,270 @@
+# Production Docker Compose for Trinity Agent Platform
+#
+# Port allocation:
+#   - 8000: Trinity backend
+#   - 80: Trinity frontend (standard HTTP)
+#   - 8080: Trinity MCP server
+#   - 8001: Scheduler service (internal health check)
+#   - 8686: Vector log aggregator
+#   - 4317: OTel Collector gRPC (OTLP)
+#   - 4318: OTel Collector HTTP (OTLP)
+#   - 8889: OTel Prometheus metrics
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: trinity-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-resend}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@trinity.example.com}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - NOTION_CLIENT_ID=${NOTION_CLIENT_ID}
+      - NOTION_CLIENT_SECRET=${NOTION_CLIENT_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_PAT=${GITHUB_PAT}
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_ALLOWED_DOMAIN=${AUTH0_ALLOWED_DOMAIN:-ability.ai}
+      # Host paths for volumes (used when creating agent containers)
+      - HOST_TEMPLATES_PATH=${HOST_TEMPLATES_PATH:-${PWD}/config/agent-templates}
+      - HOST_META_PROMPT_PATH=${HOST_META_PROMPT_PATH:-${PWD}/config/trinity-meta-prompt}
+      # OpenTelemetry Configuration (Optional)
+      - OTEL_ENABLED=${OTEL_ENABLED:-0}
+      - OTEL_COLLECTOR_ENDPOINT=${OTEL_COLLECTOR_ENDPOINT:-http://trinity-otel-collector:4317}
+      - OTEL_METRICS_EXPORTER=${OTEL_METRICS_EXPORTER:-otlp}
+      - OTEL_LOGS_EXPORTER=${OTEL_LOGS_EXPORTER:-otlp}
+      - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      - OTEL_METRIC_EXPORT_INTERVAL=${OTEL_METRIC_EXPORT_INTERVAL:-60000}
+      # Public external access URL (Tailscale Funnel, Cloudflare Tunnel, etc.)
+      - PUBLIC_CHAT_URL=${PUBLIC_CHAT_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/agent-templates:/agent-configs/templates:ro
+      - ./config/process-templates:/agent-configs/process-templates:ro
+      - ./config/trinity-meta-prompt:/trinity-meta-prompt:ro
+      - ./config/process-docs:/app/config/process-docs:ro
+      - agent-configs:/agent-configs
+      - ${TRINITY_DATA_PATH:-./trinity-data}:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      vector:
+        condition: service_healthy  # Ensure Vector is ready before backend starts agents
+    networks:
+      - trinity-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    # Production: no --reload flag
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: ../../docker/frontend/Dockerfile.prod
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+        - VITE_AUTH0_DOMAIN=${AUTH0_DOMAIN:-dev-10tz4lo7hcoijxav.us.auth0.com}
+        - VITE_AUTH0_CLIENT_ID=${VITE_AUTH0_CLIENT_ID:-bFeIEm4WAwaalgSnxsfS1V6vd4gOk0li}
+        - VITE_AUTH0_ALLOWED_DOMAIN=${AUTH0_ALLOWED_DOMAIN:-ability.ai}
+    image: trinity-frontend:prod
+    container_name: trinity-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - trinity-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: trinity-redis
+    restart: unless-stopped
+    # Redis not exposed externally in production
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - trinity-network
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Scheduler - dedicated service for cron-based agent task execution
+  # Prevents duplicate executions that occurred with multiple backend workers
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/scheduler/Dockerfile
+    container_name: trinity-scheduler
+    restart: unless-stopped
+    environment:
+      - DATABASE_PATH=/data/trinity.db
+      - REDIS_URL=redis://redis:6379
+      - HEALTH_PORT=8001
+      - LOG_LEVEL=${SCHEDULER_LOG_LEVEL:-INFO}
+      - LOCK_TIMEOUT=600
+      - AGENT_TIMEOUT=900
+      - PUBLISH_EVENTS=true
+    volumes:
+      - ${TRINITY_DATA_PATH:-./trinity-data}:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - trinity-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Vector - centralized log aggregation from all containers
+  vector:
+    image: timberio/vector:0.43.1-alpine
+    container_name: trinity-vector
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/vector.yaml:/etc/vector/vector.yaml:ro
+      - trinity-logs:/data/logs
+    ports:
+      - "8686:8686"  # Vector API (health checks)
+    networks:
+      - trinity-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8686/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s  # Give Vector time to start before health checks
+
+  mcp-server:
+    build:
+      context: ./src/mcp-server
+      dockerfile: Dockerfile
+    container_name: trinity-mcp-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - MCP_PORT=8080
+      - TRINITY_API_URL=http://backend:8000
+      - TRINITY_USERNAME=${TRINITY_USERNAME:-admin}
+      - TRINITY_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - MCP_REQUIRE_API_KEY=${MCP_REQUIRE_API_KEY:-true}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trinity-network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # OpenTelemetry Collector - receives metrics from Claude Code agents
+  # Using contrib image for deltatocumulative processor (required for Prometheus export)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    container_name: trinity-otel-collector
+    restart: unless-stopped
+    ports:
+      - "4317:4317"   # gRPC receiver (OTLP)
+      - "4318:4318"   # HTTP receiver (OTLP)
+      - "8889:8889"   # Prometheus metrics exporter
+      - "13133:13133" # Health check endpoint
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks:
+      - trinity-network
+    labels:
+      - "trinity.platform=infrastructure"
+      - "trinity.service=otel-collector"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # NOTE: No healthcheck - distroless image has no shell/curl
+    # Collector health can be checked externally via :13133 if health_check extension is enabled
+
+volumes:
+  agent-configs:
+  redis-data:
+  trinity-logs:  # Vector log storage
+  # trinity-data: using bind mount via TRINITY_DATA_PATH env var
+
+networks:
+  trinity-network:
+    driver: bridge
+    name: trinity-agent-network
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

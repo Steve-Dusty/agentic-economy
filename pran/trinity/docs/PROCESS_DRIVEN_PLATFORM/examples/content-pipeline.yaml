@@ -1,0 +1,81 @@
+# Example: Content Pipeline Process
+# 
+# This process demonstrates a sequential content generation workflow:
+# 1. Research a topic
+# 2. Write a draft based on research
+# 3. Review and edit the draft
+#
+# Usage:
+#   1. Create this process in Trinity
+#   2. Trigger with input: { "topic": "AI in Healthcare" }
+#   3. The process will execute each step in sequence
+#
+# Reference: docs/PROCESS_DRIVEN_PLATFORM/PROCESS_DRIVEN_THINKING_IT2.md
+
+name: content-pipeline
+version: 1
+description: Generate, review, and publish content on a given topic
+
+steps:
+  # Step 1: Research the topic
+  - id: research
+    name: Research Topic
+    type: agent_task
+    agent: research-agent
+    message: |
+      Research the following topic thoroughly:
+      
+      Topic: {{input.topic}}
+      
+      Please provide:
+      1. Key facts and statistics
+      2. Recent developments
+      3. Expert opinions
+      4. Potential angles for content
+    timeout: 10m
+
+  # Step 2: Write the draft
+  - id: write
+    name: Write Draft
+    type: agent_task
+    agent: writer-agent
+    message: |
+      Write a compelling article based on the following research:
+      
+      Research Summary:
+      {{steps.research.output}}
+      
+      Requirements:
+      - Length: 1000-1500 words
+      - Tone: Professional but accessible
+      - Include specific examples and data points
+      - End with a clear conclusion
+    depends_on: research
+    timeout: 15m
+
+  # Step 3: Edit and polish
+  - id: edit
+    name: Edit Content
+    type: agent_task
+    agent: editor-agent
+    message: |
+      Review and edit the following draft:
+      
+      {{steps.write.output}}
+      
+      Please:
+      1. Fix any grammar or spelling errors
+      2. Improve clarity and flow
+      3. Ensure facts are accurately represented
+      4. Add a compelling headline
+    depends_on: write
+    timeout: 10m
+
+outputs:
+  - name: article
+    source: "{{steps.edit.output}}"
+    description: The final edited article ready for publication
+
+  - name: research_notes
+    source: "{{steps.research.output}}"
+    description: Research notes for reference

@@ -1,0 +1,67 @@
+# T3.2 - Human Approval - Rejected
+# 
+# Purpose: Validate human approval flow when approval is rejected
+# Agent: process-echo, process-worker
+# Expected: Process handles rejection (step fails, on_error controls flow)
+#
+# Test Validates:
+# - Rejection causes step to fail
+# - on_error: skip_step allows process to continue
+# - Rejection is recorded
+# - Process can complete even after rejection
+
+name: t3.2-approval-rejected
+version: "1.0"
+description: "Human approval test - validates rejection flow"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: draft
+    name: Create Draft
+    type: agent_task
+    agent: process-worker
+    message: "Create a draft document for review"
+    timeout: 120s
+
+  - id: review-approval
+    name: Review Approval
+    type: human_approval
+    depends_on:
+      - draft
+    title: "Draft Review Required"
+    description: "Please review and reject this draft for testing."
+    timeout: 5m
+    assignees:
+      - "test@example.com"
+    on_error:
+      action: skip_step
+
+  - id: finalize
+    name: Finalize
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - review-approval
+    message: "Finalizing process after approval decision"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution - pauses at review-approval
+# 2. Get approval ID: GET /api/approvals?status=pending
+# 3. Submit rejection: POST /api/approvals/{approval_id}/reject {"comment": "Needs revision"}
+# 4. review-approval step marked SKIPPED (due to on_error: skip_step)
+# 5. finalize step runs
+# 6. Process completes
+
+# NOTE: Rejections cause step to FAIL in current implementation.
+# Using on_error: skip_step to allow process to continue.
+
+# Verification Checklist:
+# [ ] Rejection can be submitted
+# [ ] review-approval step is SKIPPED (not FAILED) due to on_error
+# [ ] finalize step executes
+# [ ] Process completes successfully
+# [ ] Status is COMPLETED (not FAILED)

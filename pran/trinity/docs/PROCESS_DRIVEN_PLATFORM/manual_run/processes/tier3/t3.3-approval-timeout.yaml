@@ -1,0 +1,61 @@
+# T3.3 - Human Approval with Timeout
+# 
+# Purpose: Validate approval timeout behavior
+# Agent: process-echo
+# Expected: When approval times out, configured action is taken
+#
+# Test Validates:
+# - Short timeout triggers timeout behavior
+# - on_timeout: fail causes process to fail
+# - Timeout is recorded
+
+name: t3.3-approval-timeout
+version: "1.0"
+description: "Human approval timeout test - validates timeout handling"
+
+triggers:
+  - type: webhook
+    id: webhook-start
+
+steps:
+  - id: prepare
+    name: Prepare Content
+    type: agent_task
+    agent: process-echo
+    message: "Preparing content for approval"
+    timeout: 120s
+
+  - id: short-approval
+    name: Short Approval Window
+    type: human_approval
+    depends_on:
+      - prepare
+    title: "Quick Approval (30 second timeout)"
+    description: "This approval has a 30-second timeout for testing. DO NOT approve/reject - let it timeout."
+    timeout: 30s
+    assignees:
+      - "test@example.com"
+
+  - id: post-approval
+    name: Post Approval
+    type: agent_task
+    agent: process-echo
+    depends_on:
+      - short-approval
+    message: "This should not run if timeout fails the process"
+    timeout: 120s
+
+# Test Procedure:
+# 1. Start execution
+# 2. DO NOT submit any approval
+# 3. Wait 30+ seconds
+# 4. Check execution status - step should timeout
+
+# NOTE: Timeout handling depends on implementation.
+# Current handler creates deadline but timeout enforcement may need scheduler.
+
+# Verification Checklist:
+# [ ] Approval step starts and waits
+# [ ] After 30 seconds, timeout should trigger
+# [ ] Step either times out or remains pending (implementation dependent)
+# [ ] Record timeout behavior for documentation

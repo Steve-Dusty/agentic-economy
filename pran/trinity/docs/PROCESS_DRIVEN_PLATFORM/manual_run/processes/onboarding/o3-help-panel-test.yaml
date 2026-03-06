@@ -1,0 +1,107 @@
+# O3: Multi-Type Process for Help Panel Testing
+# Purpose: Test editor help panel with various step types
+# Expected: Help panel shows relevant context for each field type
+
+name: onboarding-help-test
+version: "1.0"
+description: Process with multiple step types to test contextual help panel
+
+triggers:
+  - type: manual
+    id: manual-trigger
+  - type: webhook
+    id: webhook-trigger
+    description: Can also be triggered via webhook
+
+steps:
+  # Agent task - test help for agent, message, timeout, output_key
+  - id: gather-data
+    name: Gather Information
+    type: agent_task
+    agent: data-agent
+    message: |
+      Collect some sample data for testing.
+      Input query: {{input.query}}
+    timeout: 10m
+    output_key: data_result
+
+  # Parallel steps - test depends_on help
+  - id: analyze-a
+    name: Analysis A
+    type: agent_task
+    depends_on: [gather-data]
+    agent: analyst
+    message: Analyze the data from perspective A
+    timeout: 5m
+
+  - id: analyze-b
+    name: Analysis B
+    type: agent_task
+    depends_on: [gather-data]
+    agent: analyst
+    message: Analyze the data from perspective B
+    timeout: 5m
+
+  # Gateway - test routes, condition, default_route help
+  - id: check-results
+    name: Check Analysis Results
+    type: gateway
+    depends_on: [analyze-a, analyze-b]
+    gateway_type: exclusive
+    routes:
+      - condition: "{{steps.analyze-a.output.score}} > 80"
+        target: fast-path
+      - condition: "{{steps.analyze-a.output.score}} > 50"
+        target: standard-path
+    default_route: slow-path
+
+  # Human approval - test title, description, assignees help
+  - id: fast-path
+    name: Fast Track Approval
+    type: human_approval
+    depends_on: [check-results]
+    title: Fast Track Review
+    description: |
+      High score detected. Quick approval needed.
+      Score: {{steps.analyze-a.output.score}}
+    assignees:
+      - admin
+    timeout: 30m
+
+  - id: standard-path
+    name: Standard Review
+    type: human_approval
+    depends_on: [check-results]
+    title: Standard Review Required
+    description: Please review the analysis results.
+    timeout: 2h
+
+  - id: slow-path
+    name: Detailed Review
+    type: human_approval
+    depends_on: [check-results]
+    title: Detailed Review Required
+    description: Low score - needs careful review.
+    timeout: 4h
+
+  # Timer - test delay help
+  - id: wait-step
+    name: Cooldown Period
+    type: timer
+    depends_on: [fast-path, standard-path, slow-path]
+    delay: 1m
+
+  # Final step
+  - id: complete
+    name: Complete Process
+    type: agent_task
+    depends_on: [wait-step]
+    agent: test-echo
+    message: Process completed successfully!
+    timeout: 2m
+
+outputs:
+  - name: final_result
+    value: "{{steps.complete.output}}"
+  - name: analysis_scores
+    value: "A={{steps.analyze-a.output.score}}, B={{steps.analyze-b.output.score}}"

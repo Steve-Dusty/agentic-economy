@@ -1,0 +1,351 @@
+# Feature: Container Capabilities Configuration
+
+## Overview
+
+Controls whether agent containers run with full Docker capabilities (allowing package installation via apt-get) or restricted capabilities (secure default). This is implemented as both a **system-wide setting** and a **per-agent API endpoint** for fine-grained control.
+
+## User Story
+
+**CFG-004**: As a platform operator, I want to enable full capabilities mode for agent containers so that agents can install packages with apt-get and have full control of their container environment.
+
+## Entry Points
+
+- **System-Wide Setting**: `agent_full_capabilities` setting in SQLite via Settings service
+- **Per-Agent API**: `GET/PUT /api/agents/{name}/capabilities` (router endpoint, per-agent override stored in `agent_ownership` table)
+- **UI**: Currently no dedicated UI toggle - managed via Settings API or direct API calls
+
+## What "Full Capabilities" Means
+
+### Full Capabilities Mode (`full_capabilities=true`)
+- Container runs with **Docker default capabilities**
+- `cap_drop=[]` (no capabilities dropped)
+- `cap_add=[]` (defaults to Docker defaults)
+- `security_opt=[]` (no additional AppArmor restrictions)
+- `tmpfs={'/tmp': 'size=100m'}` (writable tmp without noexec)
+- **Allows**: `apt-get install`, `sudo`, and system-level operations
+
+### Restricted Mode (`full_capabilities=false`, secure default)
+- Container runs with **minimal capabilities**
+- `cap_drop=['ALL']` (all capabilities dropped)
+- `cap_add=['NET_BIND_SERVICE', 'SETGID', 'SETUID', 'CHOWN', 'SYS_CHROOT', 'AUDIT_WRITE']`
+- `security_opt=['apparmor:docker-default']`
+- `tmpfs={'/tmp': 'noexec,nosuid,size=100m'}`
+- **Prevents**: Package installation, most privileged operations
+
+## Backend Layer
+
+### System-Wide Setting (Settings Service)
+
+**File**: `src/backend/services/settings_service.py:128-138`
+
+```python
+def get_agent_full_capabilities() -> bool:
+    """
+    Get system-wide agent full capabilities setting.
+    Default: True (agents have full control of their container environment)
+    """
+    value = settings_service.get_setting('agent_full_capabilities', 'true')
+    return str(value).lower() in ('true', '1', 'yes')
+```
+
+### Per-Agent API Endpoints
+
+**File**: `src/backend/routers/agents.py:912-993`
+
+#### GET /api/agents/{name}/capabilities
+
+```python
+@router.get("/{agent_name}/capabilities")
+async def get_agent_capabilities(
+    agent_name: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns:
+    - full_capabilities: Database setting for this agent
+    - current_full_capabilities: Current container label value
+    """
+```
+
+**Response Example**:
+```json
+{
+  "full_capabilities": true,
+  "current_full_capabilities": false
+}
+```
+
+#### PUT /api/agents/{name}/capabilities
+
+```python
+@router.put("/{agent_name}/capabilities")
+async def set_agent_capabilities(
+    agent_name: str,
+    body: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Body: {"full_capabilities": true|false}
+    Note: Requires agent restart for changes to take effect.
+    """
+```
+
+**Response Example**:
+```json
+{
+  "message": "Capabilities updated",
+  "full_capabilities": true,
+  "restart_needed": true
+}
+```
+
+### Database Layer
+
+**File**: `src/backend/db/agents.py:420-461`
+
+| Method | Line | Description |
+|--------|------|-------------|
+| `get_full_capabilities(agent_name)` | 420-440 | Get per-agent setting from `agent_ownership.full_capabilities` |
+| `set_full_capabilities(agent_name, enabled)` | 442-461 | Update per-agent setting |
+
+**Schema** (Migration in `src/backend/database.py:248-255`):
+```sql
+ALTER TABLE agent_ownership ADD COLUMN full_capabilities INTEGER DEFAULT 0
+```
+
+### Container Creation
+
+**File**: `src/backend/services/agent_service/crud.py:430-463`
+
+When creating a new agent:
+1. Reads **system-wide** setting via `get_agent_full_capabilities()`
+2. Sets container label `trinity.full-capabilities` to reflect current value
+3. Configures Docker security options based on setting
+
+```python
+full_capabilities = get_agent_full_capabilities()
+
+container = docker_client.containers.run(
+    ...
+    labels={
+        'trinity.full-capabilities': str(full_capabilities).lower(),
+        ...
+    },
+    security_opt=['apparmor:docker-default'] if not full_capabilities else [],
+    cap_drop=[] if full_capabilities else ['ALL'],
+    cap_add=[] if full_capabilities else ['NET_BIND_SERVICE', 'SETGID', 'SETUID', 'CHOWN', 'SYS_CHROOT', 'AUDIT_WRITE'],
+    tmpfs={'/tmp': 'size=100m'} if full_capabilities else {'/tmp': 'noexec,nosuid,size=100m'},
+    ...
+)
+```
+
+### Container Recreation on Start
+
+**File**: `src/backend/services/agent_service/lifecycle.py:150-162`
+
+When starting an agent, the system checks if container needs recreation:
+
+```python
+needs_recreation = (
+    not check_shared_folder_mounts_match(container, agent_name) or
+    not check_api_key_env_matches(container, agent_name) or
+    not check_resource_limits_match(container, agent_name) or
+    not check_full_capabilities_match(container, agent_name)  # <-- Capabilities check
+)
+
+if needs_recreation:
+    await recreate_container_with_updated_config(agent_name, container, "system")
+```
+
+### Capabilities Mismatch Check
+
+**File**: `src/backend/services/agent_service/helpers.py:366-392`
+
+```python
+def check_full_capabilities_match(container, agent_name: str) -> bool:
+    """
+    Check if container's full_capabilities setting matches the current system-wide setting.
+    Returns True if capabilities match, False if recreation needed.
+
+    Note: This currently uses the SYSTEM-WIDE setting, not per-agent.
+    """
+    system_full_caps = get_agent_full_capabilities()
+
+    labels = container.attrs.get("Config", {}).get("Labels", {})
+    current_full_caps = labels.get("trinity.full-capabilities", "false").lower() == "true"
+
+    if system_full_caps != current_full_caps:
+        logger.info(f"Capabilities mismatch for {agent_name}: container={current_full_caps} -> system={system_full_caps}")
+        return False
+
+    return True
+```
+
+### Container Recreation with Capabilities
+
+**File**: `src/backend/services/agent_service/lifecycle.py:229-324`
+
+When recreating a container:
+1. Gets current system-wide setting
+2. Updates container label
+3. Creates new container with appropriate security options
+
+```python
+# Get full_capabilities from system-wide setting (not per-agent)
+full_capabilities = get_agent_full_capabilities()
+
+# Update label to reflect current setting
+labels["trinity.full-capabilities"] = str(full_capabilities).lower()
+
+# Create new container with security settings
+new_container = docker_client.containers.run(
+    ...
+    security_opt=['apparmor:docker-default'] if not full_capabilities else [],
+    cap_drop=[] if full_capabilities else ['ALL'],
+    cap_add=[] if full_capabilities else ['NET_BIND_SERVICE', 'SETGID', 'SETUID', 'CHOWN', 'SYS_CHROOT', 'AUDIT_WRITE'],
+    tmpfs={'/tmp': 'size=100m'} if full_capabilities else {'/tmp': 'noexec,nosuid,size=100m'},
+    ...
+)
+```
+
+## Frontend Layer
+
+**Current State**: No dedicated UI component for capabilities toggle.
+
+The per-agent API endpoints exist (`GET/PUT /api/agents/{name}/capabilities`) but are not exposed in the AgentDetail.vue UI. Management is currently done via:
+1. System-wide `agent_full_capabilities` setting (no UI either)
+2. Direct API calls
+
+**Potential UI Location**: Could be added to the agent settings modal alongside resource limits (gear button in `AgentDetail.vue` header, line 225).
+
+## Data Flow
+
+### System-Wide Default Flow
+```
+Settings DB (agent_full_capabilities=true/false)
+    ↓
+get_agent_full_capabilities() in settings_service.py
+    ↓
+Container creation/recreation in crud.py / lifecycle.py
+    ↓
+Docker container with appropriate cap_drop/cap_add
+```
+
+### Per-Agent Override Flow (API-only)
+```
+PUT /api/agents/{name}/capabilities {"full_capabilities": true}
+    ↓
+db.set_full_capabilities(agent_name, enabled)
+    ↓
+agent_ownership.full_capabilities column updated
+    ↓
+On next start: check_full_capabilities_match() detects mismatch
+    ↓
+Container recreated with new settings
+```
+
+**Note**: Currently, the system-wide setting takes precedence. Per-agent DB values exist but `check_full_capabilities_match()` only compares against the system-wide setting.
+
+## Error Handling
+
+| Error Case | HTTP Status | Message |
+|------------|-------------|---------|
+| Agent not found | 404 | Agent not found |
+| Not owner | 403 | Only owners can change capabilities |
+| Missing field | 400 | full_capabilities is required |
+| Invalid type | 400 | full_capabilities must be a boolean |
+
+## Security Considerations
+
+### Why Restricted Mode is More Secure
+1. **Capability Dropping**: `cap_drop=['ALL']` removes all Linux capabilities
+2. **Minimal Capability Add-back**: Only essential capabilities for agent operation:
+   - `NET_BIND_SERVICE`: Bind to low ports (if needed)
+   - `SETGID/SETUID`: Change group/user (for user switching)
+   - `CHOWN`: Change file ownership
+   - `SYS_CHROOT`: Change root directory
+   - `AUDIT_WRITE`: Write audit logs
+3. **AppArmor Profile**: Additional confinement via `apparmor:docker-default`
+4. **Noexec tmpfs**: Prevents execution from /tmp (`noexec,nosuid`)
+
+### When Full Capabilities is Needed
+- Agent templates requiring `apt-get install`
+- Agents that need to modify system configurations
+- Development/testing environments
+- Agents running privileged operations
+
+### Authorization
+- Only agent **owners** can change per-agent capabilities
+- System-wide setting requires **admin** access to Settings
+
+## Testing
+
+### Prerequisites
+- Trinity platform running locally
+- At least one agent created
+- Admin access for system-wide setting changes
+
+### Test Steps
+
+1. **Check Current Capabilities**
+   - **Action**: `GET /api/agents/{agent_name}/capabilities`
+   - **Expected**: Returns current and database capability values
+   - **Verify**: Response contains `full_capabilities` and `current_full_capabilities`
+
+2. **Set Per-Agent Capabilities**
+   - **Action**: `PUT /api/agents/{agent_name}/capabilities` with `{"full_capabilities": true}`
+   - **Expected**: Returns success with `restart_needed: true`
+   - **Verify**: Database updated (check `agent_ownership` table)
+
+3. **Verify Container Recreation on Start**
+   - **Action**: Start agent after changing capabilities
+   - **Expected**: Container is recreated with new security settings
+   - **Verify**: Check container labels: `docker inspect agent-{name} | grep full-capabilities`
+
+4. **Test Package Installation (Full Capabilities)**
+   - **Action**: With `full_capabilities=true`, run `apt-get update && apt-get install -y cowsay` in agent terminal
+   - **Expected**: Package installs successfully
+   - **Verify**: `cowsay "Hello"` works
+
+5. **Test Package Installation (Restricted)**
+   - **Action**: With `full_capabilities=false`, attempt `apt-get install`
+   - **Expected**: Operation fails with permission errors
+   - **Verify**: Error message about insufficient permissions
+
+### Edge Cases
+- Changing setting while agent is running (should set `restart_needed: true`)
+- Orphaned containers without DB record (uses container label as source of truth)
+- System-wide vs per-agent setting conflict (currently system-wide takes precedence)
+
+### Cleanup
+- Reset capabilities to default: `PUT /api/agents/{name}/capabilities {"full_capabilities": false}`
+
+### Status
+- API endpoints: Working
+- Container security: Working
+- Frontend UI toggle: Not implemented
+
+## Related Flows
+
+- **Upstream**: [Agent Lifecycle](agent-lifecycle.md) - Container creation and recreation
+- **Related**: [Agent Resource Allocation](agent-resource-allocation.md) - Similar per-agent config pattern
+- **Related**: [SSH Access](ssh-access.md) - Requires specific capabilities for privilege separation
+
+## Architecture Notes
+
+### Current Implementation Gap
+The per-agent API (`/api/agents/{name}/capabilities`) stores values in `agent_ownership.full_capabilities`, but `check_full_capabilities_match()` only uses the **system-wide** setting. This means:
+- Per-agent settings are stored but not used for container recreation decisions
+- All agents follow the system-wide `agent_full_capabilities` setting
+
+### Potential Enhancement
+To enable true per-agent capability control:
+1. Modify `check_full_capabilities_match()` to read from `db.get_full_capabilities(agent_name)` instead of `get_agent_full_capabilities()`
+2. Fall back to system-wide setting if per-agent value is not set
+
+## Revision History
+
+| Date | Change |
+|------|--------|
+| 2026-01-14 | **Security Consistency (HIGH)**: Added `RESTRICTED_CAPABILITIES` and `FULL_CAPABILITIES` constants in `lifecycle.py:31-49`. All container creation paths now ALWAYS apply baseline security (`cap_drop=['ALL']`, AppArmor, noexec tmpfs) before adding back needed capabilities. Previously some paths had inconsistent security settings. See [agent-lifecycle.md](agent-lifecycle.md) for full security constant documentation. |
+| 2026-01-13 | Initial documentation - CFG-004 feature flow |
